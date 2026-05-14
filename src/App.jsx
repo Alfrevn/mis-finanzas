@@ -18,29 +18,26 @@ function getDailyFrase() {
   return frase;
 }
 
-// prorrated: varianza diaria activa | false: solo límite vs acumulado
-// isSavings: lógica especial — acumula, no se gasta, viaja entre períodos
 const CATEGORIES = [
   { id: "supermercado", label: "Supermercado",       icon: "🛒", color: "#818cf8", prorrated: true,  isSavings: false },
   { id: "salidas",      label: "Salidas",            icon: "🎉", color: "#a78bfa", prorrated: true,  isSavings: false },
   { id: "higiene",      label: "Higiene & Limpieza", icon: "🧼", color: "#c084fc", prorrated: true,  isSavings: false },
+  { id: "transporte",   label: "Transporte",         icon: "🚌", color: "#38bdf8", prorrated: true,  isSavings: false },
   { id: "alquiler",     label: "Alquiler",           icon: "🏠", color: "#60a5fa", prorrated: false, isSavings: false },
   { id: "servicios",    label: "Servicios",          icon: "⚡", color: "#34d399", prorrated: false, isSavings: false },
-  { id: "transporte",   label: "Transporte",         icon: "🚌", color: "#f472b6", prorrated: false, isSavings: false },
   { id: "ropo",         label: "Ropo",               icon: "🌿", color: "#4ade80", prorrated: false, isSavings: false },
-  { id: "ahorro",       label: "Ahorro",             icon: "🔒", color: "#a78bfa", prorrated: false, isSavings: true  },
+  { id: "ahorro",       label: "Ahorro",             icon: "🔒", color: "#d97706", prorrated: false, isSavings: true  },
 ];
 
-const PRIORITY_IDS  = ["supermercado", "salidas", "higiene", "ahorro"];
-const SECONDARY_IDS = ["alquiler", "servicios", "transporte", "ropo"];
+const PRIORITY_IDS  = ["supermercado", "salidas", "higiene", "transporte"];
+const SECONDARY_IDS = ["alquiler", "servicios", "ropo"];
 
 const INCOME_SOURCES = [
   { id: "alfredo",   label: "Sueldo Alfredo",  icon: "👨" },
   { id: "belen",     label: "Sueldo Belén",    icon: "👩" },
   { id: "workshops", label: "Workshops Belén", icon: "🎓" },
   { id: "clases",    label: "Clases Belén",    icon: "📚" },
-  { id: "irs_alf",   label: "IRS Alfredo",     icon: "🏛️" },
-  { id: "irs_bel",   label: "IRS Belén",       icon: "🏛️" },
+  { id: "otros",     label: "Otros",           icon: "💼" },
 ];
 
 const MONTH_NAMES = ["ENERO","FEBRERO","MARZO","ABRIL","MAYO","JUNIO","JULIO","AGOSTO","SEPTIEMBRE","OCTUBRE","NOVIEMBRE","DICIEMBRE"];
@@ -62,16 +59,24 @@ function nextPeriod(p)  { const d = new Date(p.startYear, p.startMonth + 1, 10);
 function isPeriodAllowed(p) { return periodKey(p) >= MIN_PERIOD_KEY; }
 function toDateStr(d = new Date()) { return d.toISOString().slice(0, 10); }
 
+// ─── FÓRMULA CORREGIDA ────────────────────────────────────────────────────────
+// totalDays = (endDate - startDate).days  → NO +1, son días de distancia
+// daysPassed = (today - startDate).days + 1  → día 1 = el propio startDate
+// Ejemplo: start=10/5, end=9/6 → totalDays=30
+//          today=14/5 → daysPassed=5
+//          dailyRate=180/30=6  → expected=6*5=30
 function calcVariance(budget, startDate, endDate, spent) {
   if (!budget || !startDate || !endDate) return null;
   const start = new Date(startDate); start.setHours(0,0,0,0);
   const end   = new Date(endDate);   end.setHours(0,0,0,0);
   const today = new Date();          today.setHours(0,0,0,0);
-  const totalDays  = Math.max(1, Math.round((end - start) / 86400000));
-  const daysPassed = Math.max(0, Math.round((today - start) / 86400000) + 1);
+  if (today < start) return null;
+  // Inclusive both endpoints: 10/5 to 9/6 = 31 days, 10/6 to 9/7 = 30 days, etc.
+  const totalDays  = Math.max(1, Math.round((end - start) / 86400000) + 1);
+  const daysPassed = Math.min(Math.round((today - start) / 86400000) + 1, totalDays);
   const dailyRate  = budget / totalDays;
-  const expected   = Math.round(dailyRate * Math.min(daysPassed, totalDays));
-  const variance   = spent - expected;
+  const expected   = Math.round(dailyRate * daysPassed);
+  const variance   = spent - expected;   // negative = under budget = good
   const daysLeft   = Math.max(0, Math.round((end - today) / 86400000));
   const pctTime    = Math.min((daysPassed / totalDays) * 100, 100);
   return { expected, variance, daysLeft, dailyRate: parseFloat(dailyRate.toFixed(2)), pctTime };
@@ -85,9 +90,7 @@ function saveData(d) { try { localStorage.setItem("finanzas_v8", JSON.stringify(
 
 const EMPTY = { budgets:{}, expenses:[], incomes:{} };
 
-// ─── Carry savings from previous period ──────────────────────────────────────
 function getCarriedSavings(data, period) {
-  // Walk back up to 24 periods to find accumulated savings
   let total = 0;
   let p = prevPeriod(period);
   for (let i = 0; i < 24; i++) {
@@ -95,12 +98,9 @@ function getCarriedSavings(data, period) {
     if (k < MIN_PERIOD_KEY) break;
     const md = data[k];
     if (md) {
-      const periodSavings = (md.expenses||[])
-        .filter(e => e.category === "ahorro")
-        .reduce((a,b) => a + b.amount, 0);
-      // subtract any savings transfers out
-      const transfers = (md.savingsTransfers||[]).reduce((a,b) => a + b.amount, 0);
-      total += periodSavings - transfers;
+      (md.expenses||[]).forEach(e => {
+        if (e.category === "ahorro") total += e.amount; // negative entries reduce it
+      });
     }
     p = prevPeriod(p);
   }
@@ -116,13 +116,12 @@ export default function App() {
   const [toast, setToast]     = useState(null);
   const [undoStack, setUndoStack] = useState([]);
   const [frase]               = useState(getDailyFrase);
-  const [transferMode, setTransferMode] = useState(null); // catId being covered
 
   const key = periodKey(period);
   const md  = data[key] || EMPTY;
 
   function persist(next) {
-    setUndoStack(stack => [...stack.slice(-2), data]);
+    setUndoStack(s => [...s.slice(-2), data]);
     setData(next); saveData(next);
   }
 
@@ -131,7 +130,7 @@ export default function App() {
     const prev = undoStack[undoStack.length - 1];
     setUndoStack(s => s.slice(0,-1));
     setData(prev); saveData(prev);
-    showToast("↩ Acción deshecha","ok");
+    showToast("↩ Acción deshecha", "ok");
   }
 
   function showToast(msg, type="ok") {
@@ -140,7 +139,7 @@ export default function App() {
   }
 
   function selectCat(catId) {
-    setForm(f=>({...f,category:catId}));
+    setForm(f=>({...f, category:catId}));
     setLastCat(catId);
     try { localStorage.setItem("last_cat", catId); } catch {}
   }
@@ -152,16 +151,14 @@ export default function App() {
     return t;
   }
 
-  const totals       = getTotals();
+  const totals         = getTotals();
   const carriedSavings = getCarriedSavings(data, period);
-  // current period savings = carried + this period's ahorro expenses
-  const currentSavings = carriedSavings + (totals["ahorro"] || 0);
-  const totalSpent   = Object.values(totals).filter((_,i) => CATEGORIES[i]?.id !== "ahorro").reduce((a,b)=>a+b,0)
-    + (totals["ahorro"]||0); // ahorro counts as allocated
-  const totalIncome  = Object.values(md.incomes||{}).reduce((a,b)=>a+b,0);
-  const available    = totalIncome - Object.values(totals).reduce((a,b)=>a+b,0);
-  const totalBudgets = Object.values(md.budgets||{}).reduce((a,b)=>a+b,0);
-  const montoRestante = totalIncome - (md.budgets?.["ahorro"]||0) - (totalBudgets - (md.budgets?.["ahorro"]||0)) ;
+  const currentSavings = carriedSavings + (totals["ahorro"]||0);
+  const totalIncome    = Object.values(md.incomes||{}).reduce((a,b)=>a+b,0);
+  const totalSpent     = CATEGORIES.filter(c=>!c.isSavings).reduce((a,c)=>a+(totals[c.id]||0),0);
+  const available      = totalIncome - totalSpent - (totals["ahorro"]||0);
+  const totalBudgets   = Object.values(md.budgets||{}).reduce((a,b)=>a+b,0);
+  const montoRestante  = totalIncome - totalBudgets;
 
   const pStart = toDateStr(periodStart(period));
   const pEnd   = toDateStr(periodEnd(period));
@@ -171,13 +168,13 @@ export default function App() {
     if (!amt || amt <= 0) return;
     const expense = { id:Date.now(), amount:amt, category:form.category, note:(form.note||"").trim(), date:form.date||toDateStr() };
     persist({ ...data, [key]: { ...md, expenses:[...(md.expenses||[]), expense] } });
-    const budget   = md.budgets?.[form.category]||0;
-    const newSpent = (totals[form.category]||0) + amt;
-    const cat = CATEGORIES.find(c=>c.id===form.category);
-    if (cat?.isSavings) showToast(`💜 +$${amt.toLocaleString("es-AR")} al ahorro`,"good");
-    else if (budget>0 && newSpent<=budget) showToast("✓ Dentro del límite 🎯","good");
-    else if (budget>0 && newSpent>budget) showToast("⚠️ Superaste el límite","warn");
-    else showToast("Gasto registrado ✓","ok");
+    const cat    = CATEGORIES.find(c=>c.id===form.category);
+    const budget = md.budgets?.[form.category]||0;
+    const newSp  = (totals[form.category]||0) + amt;
+    if (cat?.isSavings)            showToast(`💛 +$${amt.toLocaleString("es-AR")} al ahorro`, "good");
+    else if (budget>0&&newSp<=budget) showToast("✓ Dentro del límite 🎯", "good");
+    else if (budget>0&&newSp>budget)  showToast("⚠️ Superaste el límite", "warn");
+    else                           showToast("Gasto registrado ✓", "ok");
     setForm(f=>({...f, amount:"", note:"", date:toDateStr(), showNote:false}));
   }
 
@@ -192,29 +189,14 @@ export default function App() {
     persist({ ...data, [key]: { ...md, expenses } });
   }
 
-  // Transfer from savings to cover an existing overage — no new expense created,
-  // just records a transfer and raises the effective limit for that category
-  function coverFromSavings(catId, amount) {
-    const amt = parseFloat(amount);
-    const spent = totals[catId]||0;
-    const budget = md.budgets?.[catId]||0;
-    const overage = Math.max(0, spent - budget);
-    const toTransfer = Math.min(amt, currentSavings);
-    if (!toTransfer || toTransfer <= 0) return;
-    // Raise the limit for this category by the transfer amount
-    const newBudget = budget + toTransfer;
-    // Record a negative ahorro expense (reduces savings this period)
-    const savingsExpense = { id:Date.now(), amount:-toTransfer, category:"ahorro", note:`↩ Cubrió ${CATEGORIES.find(c=>c.id===catId)?.label}`, date:toDateStr() };
-    persist({
-      ...data,
-      [key]: {
-        ...md,
-        budgets: {...(md.budgets||{}), [catId]: newBudget},
-        expenses: [...(md.expenses||[]), savingsExpense],
-      }
-    });
-    showToast(`$${toTransfer.toLocaleString("es-AR")} movidos al límite de ${CATEGORIES.find(c=>c.id===catId)?.label}`,"ok");
-    setTransferMode(null);
+  // Cover overage: raises the limit for that category, records negative ahorro entry
+  function coverFromSavings(catId, excess) {
+    const toUse = Math.min(excess, currentSavings);
+    if (toUse <= 0) return;
+    const newBudget = (md.budgets?.[catId]||0) + toUse;
+    const savingsEntry = { id:Date.now(), amount:-toUse, category:"ahorro", note:`↩ Cubrió ${CATEGORIES.find(c=>c.id===catId)?.label}`, date:toDateStr() };
+    persist({ ...data, [key]: { ...md, budgets:{...(md.budgets||{}), [catId]:newBudget}, expenses:[...(md.expenses||[]), savingsEntry] } });
+    showToast(`$${toUse.toLocaleString("es-AR")} movidos del ahorro`, "ok");
   }
 
   function doArqueo() {
@@ -225,9 +207,9 @@ export default function App() {
       if (budget>0 && spent<budget) surplus += budget-spent;
     });
     if (surplus<=0) { showToast("No hay excedente","warn"); return; }
-    const savingsExpense = { id:Date.now(), amount:surplus, category:"ahorro", note:"Arqueo de período", date:toDateStr() };
-    persist({ ...data, [key]: { ...md, expenses:[...(md.expenses||[]), savingsExpense] } });
-    showToast(`+$${surplus.toLocaleString("es-AR")} al ahorro 🏆`,"good");
+    const entry = { id:Date.now(), amount:surplus, category:"ahorro", note:"Arqueo de período", date:toDateStr() };
+    persist({ ...data, [key]: { ...md, expenses:[...(md.expenses||[]), entry] } });
+    showToast(`+$${surplus.toLocaleString("es-AR")} al ahorro 🏆`, "good");
   }
 
   function setIncome(id, val) {
@@ -239,6 +221,7 @@ export default function App() {
 
   const priorityCats  = CATEGORIES.filter(c => PRIORITY_IDS.includes(c.id));
   const secondaryCats = CATEGORIES.filter(c => SECONDARY_IDS.includes(c.id));
+  const hasOverages   = CATEGORIES.filter(c=>!c.isSavings).some(c=>(totals[c.id]||0)>(md.budgets?.[c.id]||1e9) && (md.budgets?.[c.id]||0)>0);
 
   const NAV = [
     { id:"gastos",   icon:"👌", label:"GASTOS"   },
@@ -268,8 +251,8 @@ export default function App() {
               </div>
               <div style={S.heroDivider}/>
               <div style={S.heroCard}>
-                <span style={S.heroCaption}>ahorro 🔒</span>
-                <span style={{...S.heroAmt, color:"#c4b5fd"}}>${currentSavings.toLocaleString("es-AR")}</span>
+                <span style={S.heroCaption}>gastado</span>
+                <span style={{...S.heroAmt, color:"#f87171"}}>${totalSpent.toLocaleString("es-AR")}</span>
               </div>
             </div>
           </div>
@@ -286,39 +269,36 @@ export default function App() {
         {/* ── GASTOS ── */}
         {view==="gastos" && (
           <div style={S.section}>
-            {/* PRIORITY 2x2 grid for 4 items */}
-            <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:9}}>
+
+            {/* 4 PRIORITY — 2x2 grid, big */}
+            <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10}}>
               {priorityCats.map(cat => {
                 const spent  = totals[cat.id]||0;
-                const effectiveSpent = cat.isSavings ? currentSavings : spent;
-                const budget = cat.isSavings ? (md.budgets?.["ahorro"]||0) : (md.budgets?.[cat.id]||0);
-                const ok     = budget>0 && effectiveSpent<=budget;
-                const over   = budget>0 && effectiveSpent>budget;
-                const v      = cat.prorrated ? calcVariance(budget, pStart, pEnd, effectiveSpent) : null;
+                const budget = md.budgets?.[cat.id]||0;
+                const ok     = budget>0 && spent<=budget;
+                const over   = budget>0 && spent>budget;
+                const v      = cat.prorrated ? calcVariance(budget, pStart, pEnd, spent) : null;
                 const sel    = form.category===cat.id;
                 return (
                   <button key={cat.id} style={{
                     display:"flex", flexDirection:"column", alignItems:"center",
-                    padding:"20px 6px", borderRadius:18, border:"2px solid", cursor:"pointer",
-                    borderColor: sel?"#c4b5fd": over?"#f87171": ok?"#4ade80":"#2a3a4a",
-                    background:  sel?"#c4b5fd22": over?"#3b091066": ok?"#14532d44":"#1a1a2e",
-                    transform: sel?"scale(1.05)":"scale(1)", transition:"all 0.15s",
+                    padding:"22px 6px", borderRadius:20, border:"2px solid", cursor:"pointer",
+                    borderColor: sel?"#22d3ee": over?"#f87171": ok?"#4ade80":"#2a3a4a",
+                    background:  sel?"#164e6388": over?"#3b091066": ok?"#14532d44":"#1a1a2e",
+                    transform: sel?"scale(1.04)":"scale(1)", transition:"all 0.15s",
                   }} onClick={()=>selectCat(cat.id)}>
-                    <span style={{fontSize:32}}>{cat.icon}</span>
-                    <span style={{color:"#e2e8f0", fontSize:12, marginTop:6, textAlign:"center", fontWeight:700}}>{cat.label}</span>
-                    {cat.isSavings && carriedSavings>0 && (
-                      <span style={{color:"#7c3aed",fontSize:9,marginTop:2}}>+${carriedSavings.toLocaleString("es-AR")} arrastrado</span>
-                    )}
+                    <span style={{fontSize:34}}>{cat.icon}</span>
+                    <span style={{color:"#e2e8f0", fontSize:13, marginTop:6, textAlign:"center", fontWeight:700}}>{cat.label}</span>
                     {budget>0&&(
-                      <span style={{fontSize:10, fontWeight:700, marginTop:3, color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
-                        ${effectiveSpent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
+                      <span style={{fontSize:11, fontWeight:700, marginTop:3, color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
+                        ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
                       </span>
                     )}
                     {v&&(
-                      <span style={{fontSize:11,fontWeight:800,marginTop:4,
+                      <span style={{fontSize:12,fontWeight:800,marginTop:5,
                         color:v.variance<=0?"#4ade80":"#f87171",
                         background:v.variance<=0?"#14532d66":"#7f1d1d66",
-                        borderRadius:6,padding:"2px 8px"}}>
+                        borderRadius:8,padding:"3px 10px"}}>
                         {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}` : `-${v.variance.toLocaleString("es-AR")}`}
                       </span>
                     )}
@@ -327,7 +307,7 @@ export default function App() {
               })}
             </div>
 
-            {/* SECONDARY 4 cols */}
+            {/* SECONDARY — 4 cols, one row */}
             <div style={{display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:5}}>
               {secondaryCats.map(cat => {
                 const spent  = totals[cat.id]||0;
@@ -338,23 +318,44 @@ export default function App() {
                 return (
                   <button key={cat.id} style={{
                     display:"flex", flexDirection:"column", alignItems:"center",
-                    padding:"8px 3px", borderRadius:10, border:"1px solid", cursor:"pointer",
-                    borderColor: sel?"#c4b5fd": over?"#f87171": ok?"#4ade80":"#2a3a4a",
-                    background:  sel?"#c4b5fd22": over?"#3b091066": ok?"#14532d44":"#1a1a2e",
-                    transform: sel?"scale(1.05)":"scale(1)", transition:"all 0.15s",
+                    padding:"7px 2px", borderRadius:10, border:"1.5px solid", cursor:"pointer",
+                    borderColor: sel?"#22d3ee": over?"#f87171": ok?"#4ade80":"#2a3a4a",
+                    background:  sel?"#164e6344": over?"#3b091066": ok?"#14532d44":"#1a1a2e",
+                    transform: sel?"scale(1.04)":"scale(1)", transition:"all 0.15s",
                   }} onClick={()=>selectCat(cat.id)}>
                     <span style={{fontSize:17}}>{cat.icon}</span>
-                    <span style={{color:"#cbd5e1",fontSize:9,marginTop:3,textAlign:"center"}}>{cat.label}</span>
+                    <span style={{color:"#cbd5e1",fontSize:9,marginTop:2,textAlign:"center",fontWeight:600}}>{cat.label}</span>
                     {budget>0&&(
-                      <span style={{fontSize:9,fontWeight:700,marginTop:2,color:over?"#f87171":ok?"#4ade80":"#64748b"}}>
+                      <span style={{fontSize:8,fontWeight:700,marginTop:1,color:over?"#f87171":ok?"#4ade80":"#64748b"}}>
                         ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
                       </span>
                     )}
                   </button>
                 );
               })}
+              {/* AHORRO como botón secundario */}
+              {(()=>{
+                const cat = CATEGORIES.find(c=>c.id==="ahorro");
+                const sel = form.category==="ahorro";
+                return (
+                  <button key="ahorro" style={{
+                    display:"flex", flexDirection:"column", alignItems:"center",
+                    padding:"7px 2px", borderRadius:10, border:"1.5px solid", cursor:"pointer",
+                    borderColor: sel?"#22d3ee":"#92400e",
+                    background:  sel?"#164e6344":"#1c150a",
+                    transform: sel?"scale(1.04)":"scale(1)", transition:"all 0.15s",
+                  }} onClick={()=>selectCat("ahorro")}>
+                    <span style={{fontSize:17}}>{cat.icon}</span>
+                    <span style={{color:"#fbbf24",fontSize:9,marginTop:2,textAlign:"center",fontWeight:700}}>{cat.label}</span>
+                    <span style={{fontSize:8,fontWeight:700,marginTop:1,color:"#d97706"}}>
+                      ${currentSavings.toLocaleString("es-AR")}
+                    </span>
+                  </button>
+                );
+              })()}
             </div>
 
+            {/* MONTO */}
             <input style={S.bigInput} type="number" inputMode="decimal" placeholder="0"
               value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}
               onKeyDown={e=>{ if(e.key==="Enter") addFromForm(); }}/>
@@ -365,7 +366,6 @@ export default function App() {
             }
             <button style={S.primaryBtn} onClick={addFromForm}>👌 Registrar</button>
 
-            {/* ARQUEO + UNDO */}
             <div style={{display:"flex",gap:8,marginTop:2}}>
               <button style={{...S.ghostBtn,flex:1,margin:0,padding:"9px",fontSize:11}} onClick={doArqueo}>📊 Arquear período</button>
               {undoStack.length>0&&(
@@ -373,23 +373,20 @@ export default function App() {
               )}
             </div>
 
-            {/* COVER FROM SAVINGS */}
-            {currentSavings>0 && CATEGORIES.filter(c=>!c.isSavings).some(c=>(totals[c.id]||0)>(md.budgets?.[c.id]||0) && (md.budgets?.[c.id]||0)>0) && (
-              <div style={{...S.catCard,borderColor:"#7c3aed"}}>
-                <div style={{color:"#c4b5fd",fontSize:12,fontWeight:700,marginBottom:8}}>💜 Cubrir excedente con ahorro</div>
+            {/* CUBRIR EXCEDENTES CON AHORRO */}
+            {currentSavings>0 && hasOverages && (
+              <div style={{...S.catCard,borderColor:"#92400e",background:"#1c150a"}}>
+                <div style={{color:"#fbbf24",fontSize:12,fontWeight:700,marginBottom:8}}>💛 Cubrir excedente con ahorro</div>
                 {CATEGORIES.filter(c=>!c.isSavings).map(cat=>{
                   const spent = totals[cat.id]||0;
                   const budget = md.budgets?.[cat.id]||0;
-                  const over = budget>0 && spent>budget;
-                  if (!over) return null;
+                  if (!(budget>0 && spent>budget)) return null;
                   const excess = spent-budget;
                   return (
                     <div key={cat.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                       <span style={{color:"#e2e8f0",fontSize:12}}>{cat.icon} {cat.label} <span style={{color:"#f87171"}}>+${excess.toLocaleString("es-AR")}</span></span>
-                      <button style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:8,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}
-                        onClick={()=>coverFromSavings(cat.id, excess)}>
-                        Cubrir ${excess.toLocaleString("es-AR")}
-                      </button>
+                      <button style={{background:"#d97706",color:"#fff",border:"none",borderRadius:8,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}
+                        onClick={()=>coverFromSavings(cat.id, excess)}>Cubrir</button>
                     </div>
                   );
                 })}
@@ -416,15 +413,16 @@ export default function App() {
               const over   = budget>0 && spent>budget;
               const pct    = budget>0 ? Math.min((spent/budget)*100,100) : 0;
               const v      = cat.prorrated ? calcVariance(budget, pStart, pEnd, spent) : null;
+              const isSav  = cat.isSavings;
               return (
-                <div key={cat.id} style={{...S.catCard,...(cat.isSavings?{borderColor:"#7c3aed"}:{})}}>
+                <div key={cat.id} style={{...S.catCard,...(isSav?{borderColor:"#92400e",background:"#1c150a"}:{})}}>
                   <div style={{...S.catHeader,marginBottom:budget>0?8:0}}>
-                    <span style={{...S.rowLabel,...(cat.isSavings?{color:"#c4b5fd"}:{})}}>{cat.icon} {cat.label}</span>
+                    <span style={{...S.rowLabel,...(isSav?{color:"#fbbf24"}:{})}}>{cat.icon} {cat.label}</span>
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
                       {v&&<span style={{fontSize:11,fontWeight:800,color:v.variance<=0?"#4ade80":"#f87171"}}>
                         {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}` : `-${v.variance.toLocaleString("es-AR")}`}
                       </span>}
-                      <input style={{...S.rowInput,...(cat.isSavings?{color:"#c4b5fd",borderColor:"#7c3aed66"}:{})}}
+                      <input style={{...S.rowInput,...(isSav?{color:"#fbbf24",borderColor:"#92400e"}:{})}}
                         type="number" inputMode="decimal" placeholder="Límite"
                         value={budget||""} onChange={e=>setBudget(cat.id,e.target.value)}/>
                     </div>
@@ -432,7 +430,7 @@ export default function App() {
                   {budget>0&&(
                     <>
                       <div style={{...S.barTrack,position:"relative"}}>
-                        <div style={{...S.barFill,width:`${pct}%`,backgroundColor:over?"#f87171":cat.color}}/>
+                        <div style={{...S.barFill,width:`${pct}%`,backgroundColor:over?"#f87171":isSav?"#d97706":cat.color}}/>
                         {v&&v.pctTime>0&&<div style={{position:"absolute",top:0,bottom:0,left:`${v.pctTime}%`,width:2,backgroundColor:"rgba(255,255,255,0.3)"}}/>}
                       </div>
                       {v&&<div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
@@ -476,18 +474,24 @@ export default function App() {
         )}
       </div>
 
-      {/* BOTTOM NAV — 4 tabs, Gastos más ancho */}
+      {/* BOTTOM NAV — 4 tabs */}
       <div style={S.bottomNav}>
-        {NAV.map(n=>(
-          <button key={n.id} style={{
-            ...S.bnItem,
-            ...(view===n.id?(n.id==="gastos"?S.bnMainActive:S.bnActive):{}),
-            ...(n.id==="gastos"?S.bnMain:{}),
-          }} onClick={()=>setView(n.id)}>
-            <span style={{fontSize:n.id==="gastos"?28:17}}>{n.icon}</span>
-            <span style={{fontSize:n.id==="gastos"?12:9,marginTop:1,fontWeight:n.id==="gastos"?800:400,letterSpacing:n.id==="gastos"?1:0}}>{n.label}</span>
-          </button>
-        ))}
+        {NAV.map(n=>{
+          const active = view===n.id;
+          const isMain = n.id==="gastos";
+          return (
+            <button key={n.id} style={{
+              ...S.bnItem,
+              ...(isMain?S.bnMain:{}),
+              color: active?"#22d3ee": isMain?"#94a3b8":"#475569",
+              borderTop: active?"2px solid #22d3ee":"2px solid transparent",
+              background: active&&isMain?"#0e2a2e": isMain?"#0d1a1c":"transparent",
+            }} onClick={()=>setView(n.id)}>
+              <span style={{fontSize:isMain?28:17,transition:"all 0.15s"}}>{n.icon}</span>
+              <span style={{fontSize:isMain?12:9,marginTop:1,fontWeight:active?800:400,letterSpacing:isMain?1:0}}>{n.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       {toast&&(
@@ -517,7 +521,7 @@ function History({ expenses, onDelete, onUpdate }) {
                 <div style={{display:"flex",gap:8,alignItems:"center"}}>
                   <span style={{fontSize:18}}>{cat?.icon}</span>
                   <input style={{...S.inputSm,flex:1}} type="number"
-                    defaultValue={e.amount} onBlur={ev=>onUpdate(e.id,"amount",ev.target.value)}/>
+                    defaultValue={Math.abs(e.amount)} onBlur={ev=>onUpdate(e.id,"amount",ev.target.value)}/>
                 </div>
                 <input style={{...S.inputSm,marginTop:6}} type="date"
                   defaultValue={e.date?.slice(0,10)} onBlur={ev=>onUpdate(e.id,"date",ev.target.value)}/>
@@ -540,7 +544,7 @@ function History({ expenses, onDelete, onUpdate }) {
                   </div>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{color: e.amount<0?"#f87171":cat?.color, fontWeight:700}}>
+                  <span style={{color:e.amount<0?"#f87171":cat?.color,fontWeight:700}}>
                     {e.amount<0?"-":"+"}${Math.abs(e.amount||0).toLocaleString("es-AR")}
                   </span>
                   <button style={S.editBtn} onClick={()=>setEditId(e.id)}>✏️</button>
@@ -580,16 +584,14 @@ const S = {
   row:         { display:"flex", alignItems:"center", justifyContent:"space-between", background:"#1a1a2e", borderRadius:10, padding:"11px 13px", border:"1px solid #1e2a3a" },
   rowLabel:    { color:"#cbd5e1", fontSize:13, fontWeight:500 },
   rowInput:    { background:"#0f0f1a", border:"1px solid #334155", borderRadius:8, padding:"7px 11px", color:"#818cf8", fontSize:14, fontFamily:"inherit", width:110, textAlign:"right", outline:"none" },
-  bigInput:    { background:"#1a1a2e", border:"2px solid #818cf8", borderRadius:14, padding:"13px 16px", color:"#f1f5f9", fontSize:28, fontFamily:"inherit", outline:"none", width:"100%", boxSizing:"border-box", textAlign:"center", fontWeight:800 },
+  bigInput:    { background:"#1a1a2e", border:"2px solid #22d3ee", borderRadius:14, padding:"13px 16px", color:"#f1f5f9", fontSize:28, fontFamily:"inherit", outline:"none", width:"100%", boxSizing:"border-box", textAlign:"center", fontWeight:800 },
   inputSm:     { background:"#1a1a2e", border:"1px solid #334155", borderRadius:10, padding:"10px 13px", color:"#e2e8f0", fontSize:14, fontFamily:"inherit", outline:"none", width:"100%", boxSizing:"border-box" },
   noteToggle:  { background:"none", border:"none", color:"#475569", fontSize:12, cursor:"pointer", textAlign:"left", padding:"0 2px", fontFamily:"inherit" },
-  primaryBtn:  { background:"#6366f1", color:"#fff", border:"none", borderRadius:12, padding:"13px", fontSize:14, fontWeight:800, cursor:"pointer", fontFamily:"inherit", marginTop:4, width:"100%" },
+  primaryBtn:  { background:"#0891b2", color:"#fff", border:"none", borderRadius:12, padding:"13px", fontSize:14, fontWeight:800, cursor:"pointer", fontFamily:"inherit", marginTop:4, width:"100%" },
   ghostBtn:    { background:"none", color:"#64748b", border:"1px solid #334155", borderRadius:12, padding:"9px", fontSize:13, cursor:"pointer", fontFamily:"inherit", marginTop:4 },
   bottomNav:   { position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:420, background:"#0a0a14", borderTop:"1px solid #1e2a3a", display:"flex", zIndex:100, paddingBottom:"env(safe-area-inset-bottom)" },
-  bnItem:      { flex:1, display:"flex", flexDirection:"column", alignItems:"center", padding:"8px 2px", background:"none", border:"none", color:"#334155", cursor:"pointer", fontSize:9, fontFamily:"inherit" },
-  bnActive:    { color:"#818cf8" },
-  bnMain:      { flex:1.8, background:"#12122a" },
-  bnMainActive:{ color:"#fff", background:"#1e1e3a" },
+  bnItem:      { flex:1, display:"flex", flexDirection:"column", alignItems:"center", padding:"8px 2px", background:"none", border:"none", cursor:"pointer", fontSize:9, fontFamily:"inherit", borderTop:"2px solid transparent", transition:"all 0.15s" },
+  bnMain:      { flex:1.8 },
   editBtn:     { background:"none", border:"1px solid #334155", borderRadius:6, width:28, height:28, cursor:"pointer", fontSize:13 },
   hint:        { color:"#334155", fontSize:13, textAlign:"center", padding:"20px 0" },
   toast:       { position:"fixed", bottom:82, left:"50%", transform:"translateX(-50%)", padding:"14px 28px", borderRadius:24, fontSize:15, fontWeight:800, zIndex:999, whiteSpace:"nowrap", fontFamily:"inherit", boxShadow:"0 4px 24px rgba(0,0,0,0.4)" },
