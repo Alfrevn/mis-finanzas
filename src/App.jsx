@@ -2,8 +2,12 @@ import { useState } from "react";
 
 const FRASES = [
   "Somos los favoritos del universo",
-  "Prueba 2",
-  "Prueba 3",
+  "Todo llega a nuestras vidas con facilidad, gozo y gloria",
+  "Esperemos las invitaciones",
+  "Te amo pequitas",
+  "Vamos excelentemente bien",
+  "Momentos \"Love is Blind\"",
+  "El guionista está re fumado",
 ];
 
 function getDailyFrase() {
@@ -57,7 +61,13 @@ function periodLabel(p) { return MONTH_NAMES[p.startMonth]; }
 function prevPeriod(p)  { const d = new Date(p.startYear, p.startMonth - 1, 10); return { startYear: d.getFullYear(), startMonth: d.getMonth() }; }
 function nextPeriod(p)  { const d = new Date(p.startYear, p.startMonth + 1, 10); return { startYear: d.getFullYear(), startMonth: d.getMonth() }; }
 function isPeriodAllowed(p) { return periodKey(p) >= MIN_PERIOD_KEY; }
-function toDateStr(d = new Date()) { return d.toISOString().slice(0, 10); }
+function toDateStr(d = new Date()) {
+  // Use local date to avoid UTC timezone shift (e.g. Lisboa UTC+1 would shift dates back 1 day)
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 // ─── FÓRMULA CORREGIDA ────────────────────────────────────────────────────────
 // totalDays = (endDate - startDate).days  → NO +1, son días de distancia
@@ -483,9 +493,9 @@ export default function App() {
             <button key={n.id} style={{
               ...S.bnItem,
               ...(isMain?S.bnMain:{}),
-              color: active?"#22d3ee": isMain?"#94a3b8":"#475569",
+              color: active?"#22d3ee":"#475569",
               borderTop: active?"2px solid #22d3ee":"2px solid transparent",
-              background: active&&isMain?"#0e2a2e": isMain?"#0d1a1c":"transparent",
+              background: "transparent",
             }} onClick={()=>setView(n.id)}>
               <span style={{fontSize:isMain?28:17,transition:"all 0.15s"}}>{n.icon}</span>
               <span style={{fontSize:isMain?12:9,marginTop:1,fontWeight:active?800:400,letterSpacing:isMain?1:0}}>{n.label}</span>
