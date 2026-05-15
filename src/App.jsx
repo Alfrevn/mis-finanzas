@@ -1,26 +1,5 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 
-const FRASES = [
-  "Somos los favoritos del universo",
-  "Todo llega a nuestras vidas con facilidad, gozo y gloria",
-  "Esperemos las invitaciones",
-  "Te amo pequitas",
-  "Vamos excelentemente bien",
-  "Momentos \"Love is Blind\"",
-  "El guionista está re fumado",
-];
-
-function getDailyFrase() {
-  const today = new Date().toISOString().slice(0, 10);
-  const stored = (() => { try { return JSON.parse(localStorage.getItem("frase_v1") || "{}"); } catch { return {}; } })();
-  if (stored.date === today) return stored.frase;
-  const seen = stored.seen || [];
-  const unseen = FRASES.filter(f => !seen.includes(f));
-  const pool = unseen.length > 0 ? unseen : FRASES;
-  const frase = pool[Math.floor(Math.random() * pool.length)];
-  try { localStorage.setItem("frase_v1", JSON.stringify({ date: today, frase, seen: unseen.length > 0 ? [...seen, frase] : [frase] })); } catch {}
-  return frase;
-}
 
 const CATEGORIES = [
   { id: "supermercado", label: "Supermercado",       icon: "🛒", color: "#818cf8", prorrated: true,  isSavings: false },
@@ -33,8 +12,7 @@ const CATEGORIES = [
   { id: "ahorro",       label: "Ahorro",             icon: "🔒", color: "#d97706", prorrated: false, isSavings: true  },
 ];
 
-const PRIORITY_IDS  = ["supermercado", "salidas", "higiene"];
-const SECONDARY_IDS = ["transporte", "alquiler", "servicios", "ropo"];
+const SPEND_CATS = CATEGORIES.filter(c => !c.isSavings);
 
 const INCOME_SOURCES = [
   { id: "alfredo",   label: "Sueldo Alfredo",  icon: "👨" },
@@ -53,7 +31,6 @@ function getPeriodForDate(d = new Date()) {
   const prev = new Date(year, month - 1, 10);
   return { startYear: prev.getFullYear(), startMonth: prev.getMonth() };
 }
-
 function periodKey(p)   { return `${p.startYear}-${p.startMonth}`; }
 function periodStart(p) { return new Date(p.startYear, p.startMonth, 10); }
 function periodEnd(p)   { return new Date(p.startYear, p.startMonth + 1, 9); }
@@ -61,32 +38,25 @@ function periodLabel(p) { return MONTH_NAMES[p.startMonth]; }
 function prevPeriod(p)  { const d = new Date(p.startYear, p.startMonth - 1, 10); return { startYear: d.getFullYear(), startMonth: d.getMonth() }; }
 function nextPeriod(p)  { const d = new Date(p.startYear, p.startMonth + 1, 10); return { startYear: d.getFullYear(), startMonth: d.getMonth() }; }
 function isPeriodAllowed(p) { return periodKey(p) >= MIN_PERIOD_KEY; }
+
 function toDateStr(d = new Date()) {
-  // Use local date to avoid UTC timezone shift (e.g. Lisboa UTC+1 would shift dates back 1 day)
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
 
-// ─── FÓRMULA CORREGIDA ────────────────────────────────────────────────────────
-// totalDays = (endDate - startDate).days  → NO +1, son días de distancia
-// daysPassed = (today - startDate).days + 1  → día 1 = el propio startDate
-// Ejemplo: start=10/5, end=9/6 → totalDays=30
-//          today=14/5 → daysPassed=5
-//          dailyRate=180/30=6  → expected=6*5=30
 function calcVariance(budget, startDate, endDate, spent) {
   if (!budget || !startDate || !endDate) return null;
   const start = new Date(startDate); start.setHours(0,0,0,0);
   const end   = new Date(endDate);   end.setHours(0,0,0,0);
   const today = new Date();          today.setHours(0,0,0,0);
   if (today < start) return null;
-  // Inclusive both endpoints: 10/5 to 9/6 = 31 days, 10/6 to 9/7 = 30 days, etc.
   const totalDays  = Math.max(1, Math.round((end - start) / 86400000) + 1);
   const daysPassed = Math.min(Math.round((today - start) / 86400000) + 1, totalDays);
   const dailyRate  = budget / totalDays;
   const expected   = Math.round(dailyRate * daysPassed);
-  const variance   = spent - expected;   // negative = under budget = good
+  const variance   = spent - expected;
   const daysLeft   = Math.max(0, Math.round((end - today) / 86400000));
   const pctTime    = Math.min((daysPassed / totalDays) * 100, 100);
   return { expected, variance, daysLeft, dailyRate: parseFloat(dailyRate.toFixed(2)), pctTime };
@@ -107,25 +77,21 @@ function getCarriedSavings(data, period) {
     const k = periodKey(p);
     if (k < MIN_PERIOD_KEY) break;
     const md = data[k];
-    if (md) {
-      (md.expenses||[]).forEach(e => {
-        if (e.category === "ahorro") total += e.amount; // negative entries reduce it
-      });
-    }
+    if (md) (md.expenses||[]).forEach(e => { if (e.category === "ahorro") total += e.amount; });
     p = prevPeriod(p);
   }
   return Math.max(0, total);
 }
 
 export default function App() {
-  const [period, setPeriod]   = useState(() => getPeriodForDate());
-  const [view, setView]       = useState("gastos");
-  const [data, setData]       = useState(loadData);
-  const [lastCat, setLastCat] = useState(() => { try { return localStorage.getItem("last_cat") || "supermercado"; } catch { return "supermercado"; } });
-  const [form, setForm]       = useState({ amount:"", category:lastCat, note:"", date:toDateStr(), showNote:false });
-  const [toast, setToast]     = useState(null);
+  const [period, setPeriod]     = useState(() => getPeriodForDate());
+  const [view, setView]         = useState("gastos");
+  const [data, setData]         = useState(loadData);
+  const [lastCat, setLastCat]   = useState(() => { try { return localStorage.getItem("last_cat") || "supermercado"; } catch { return "supermercado"; } });
+  const [form, setForm]         = useState({ amount:"", category:lastCat, note:"", date:toDateStr(), showNote:false });
+  const [toast, setToast]       = useState(null);
   const [undoStack, setUndoStack] = useState([]);
-  const [frase]               = useState(getDailyFrase);
+  const amountInputRef = useRef(null);
 
   const key = periodKey(period);
   const md  = data[key] || EMPTY;
@@ -134,7 +100,6 @@ export default function App() {
     setUndoStack(s => [...s.slice(-2), data]);
     setData(next); saveData(next);
   }
-
   function undo() {
     if (!undoStack.length) return;
     const prev = undoStack[undoStack.length - 1];
@@ -142,16 +107,14 @@ export default function App() {
     setData(prev); saveData(prev);
     showToast("↩ Acción deshecha", "ok");
   }
-
   function showToast(msg, type="ok") {
-    setToast({msg,type});
-    setTimeout(()=>setToast(null), 3500);
+    setToast({msg,type}); setTimeout(()=>setToast(null), 3500);
   }
-
   function selectCat(catId) {
     setForm(f=>({...f, category:catId}));
     setLastCat(catId);
     try { localStorage.setItem("last_cat", catId); } catch {}
+    setTimeout(() => { amountInputRef.current?.focus(); }, 50);
   }
 
   function getTotals() {
@@ -165,7 +128,7 @@ export default function App() {
   const carriedSavings = getCarriedSavings(data, period);
   const currentSavings = carriedSavings + (totals["ahorro"]||0);
   const totalIncome    = Object.values(md.incomes||{}).reduce((a,b)=>a+b,0);
-  const totalSpent     = CATEGORIES.filter(c=>!c.isSavings).reduce((a,c)=>a+(totals[c.id]||0),0);
+  const totalSpent     = SPEND_CATS.reduce((a,c)=>a+(totals[c.id]||0),0);
   const available      = totalIncome - totalSpent - (totals["ahorro"]||0);
   const totalBudgets   = Object.values(md.budgets||{}).reduce((a,b)=>a+b,0);
   const montoRestante  = totalIncome - totalBudgets;
@@ -178,40 +141,35 @@ export default function App() {
     if (!amt || amt <= 0) return;
     const expense = { id:Date.now(), amount:amt, category:form.category, note:(form.note||"").trim(), date:form.date||toDateStr() };
     persist({ ...data, [key]: { ...md, expenses:[...(md.expenses||[]), expense] } });
-    const cat    = CATEGORIES.find(c=>c.id===form.category);
     const budget = md.budgets?.[form.category]||0;
     const newSp  = (totals[form.category]||0) + amt;
-    if (cat?.isSavings)            showToast(`💛 +$${amt.toLocaleString("es-AR")} al ahorro`, "good");
-    else if (budget>0&&newSp<=budget) showToast("✓ Dentro del límite 🎯", "good");
-    else if (budget>0&&newSp>budget)  showToast("⚠️ Superaste el límite", "warn");
-    else                           showToast("Gasto registrado ✓", "ok");
+    if (budget>0&&newSp<=budget)   showToast("✓ Dentro del límite 🎯","good");
+    else if (budget>0&&newSp>budget) showToast("⚠️ Superaste el límite","warn");
+    else                           showToast("Gasto registrado ✓","ok");
     setForm(f=>({...f, amount:"", note:"", date:toDateStr(), showNote:false}));
   }
 
   function deleteExpense(id) {
     persist({ ...data, [key]: { ...md, expenses:(md.expenses||[]).filter(e=>e.id!==id) } });
   }
-
   function updateExpense(id, field, value) {
-    const expenses = (md.expenses||[]).map(e =>
-      e.id===id ? {...e, [field]: field==="amount"?parseFloat(value)||0:value} : e
-    );
+    const expenses = (md.expenses||[]).map(e => e.id===id ? {...e, [field]: field==="amount"?parseFloat(value)||0:value} : e);
     persist({ ...data, [key]: { ...md, expenses } });
   }
-
-  // Cover overage: raises the limit for that category, records negative ahorro entry
-  function coverFromSavings(catId, excess) {
-    const toUse = Math.min(excess, currentSavings);
-    if (toUse <= 0) return;
-    const newBudget = (md.budgets?.[catId]||0) + toUse;
-    const savingsEntry = { id:Date.now(), amount:-toUse, category:"ahorro", note:`↩ Cubrió ${CATEGORIES.find(c=>c.id===catId)?.label}`, date:toDateStr() };
-    persist({ ...data, [key]: { ...md, budgets:{...(md.budgets||{}), [catId]:newBudget}, expenses:[...(md.expenses||[]), savingsEntry] } });
-    showToast(`$${toUse.toLocaleString("es-AR")} movidos del ahorro`, "ok");
+  function addSavings(amt) {
+    const entry = { id:Date.now(), amount:amt, category:"ahorro", note:"Ahorro", date:toDateStr() };
+    persist({ ...data, [key]: { ...md, expenses:[...(md.expenses||[]), entry] } });
+    showToast(`💛 +$${amt.toLocaleString("es-AR")} al ahorro`,"good");
   }
-
+  function editSavings(newTotal) {
+    const diff = newTotal - currentSavings;
+    const entry = { id:Date.now(), amount:diff, category:"ahorro", note:"Ajuste manual", date:toDateStr() };
+    persist({ ...data, [key]: { ...md, expenses:[...(md.expenses||[]), entry] } });
+    showToast("Ahorro actualizado ✓","good");
+  }
   function doArqueo() {
     let surplus = 0;
-    CATEGORIES.filter(c=>!c.isSavings).forEach(cat => {
+    SPEND_CATS.forEach(cat => {
       const budget = md.budgets?.[cat.id]||0;
       const spent  = totals[cat.id]||0;
       if (budget>0 && spent<budget) surplus += budget-spent;
@@ -219,9 +177,16 @@ export default function App() {
     if (surplus<=0) { showToast("No hay excedente","warn"); return; }
     const entry = { id:Date.now(), amount:surplus, category:"ahorro", note:"Arqueo de período", date:toDateStr() };
     persist({ ...data, [key]: { ...md, expenses:[...(md.expenses||[]), entry] } });
-    showToast(`+$${surplus.toLocaleString("es-AR")} al ahorro 🏆`, "good");
+    showToast(`+$${surplus.toLocaleString("es-AR")} al ahorro 🏆`,"good");
   }
-
+  function coverFromSavings(catId, excess) {
+    const toUse = Math.min(excess, currentSavings);
+    if (toUse<=0) return;
+    const newBudget = (md.budgets?.[catId]||0) + toUse;
+    const entry = { id:Date.now(), amount:-toUse, category:"ahorro", note:`↩ Cubrió ${CATEGORIES.find(c=>c.id===catId)?.label}`, date:toDateStr() };
+    persist({ ...data, [key]: { ...md, budgets:{...(md.budgets||{}), [catId]:newBudget}, expenses:[...(md.expenses||[]), entry] } });
+    showToast(`$${toUse.toLocaleString("es-AR")} movidos del ahorro`,"ok");
+  }
   function setIncome(id, val) {
     persist({ ...data, [key]: { ...md, incomes:{...(md.incomes||{}), [id]:parseFloat(val)||0} } });
   }
@@ -229,9 +194,7 @@ export default function App() {
     persist({ ...data, [key]: { ...md, budgets:{...(md.budgets||{}), [id]:parseFloat(val)||0} } });
   }
 
-  const priorityCats  = CATEGORIES.filter(c => PRIORITY_IDS.includes(c.id));
-  const secondaryCats = CATEGORIES.filter(c => SECONDARY_IDS.includes(c.id));
-  const hasOverages   = CATEGORIES.filter(c=>!c.isSavings).some(c=>(totals[c.id]||0)>(md.budgets?.[c.id]||1e9) && (md.budgets?.[c.id]||0)>0);
+  const hasOverages = SPEND_CATS.some(c=>(totals[c.id]||0)>(md.budgets?.[c.id]||1e9) && (md.budgets?.[c.id]||0)>0);
 
   const NAV = [
     { id:"gastos",   icon:"👌", label:"GASTOS"   },
@@ -240,10 +203,77 @@ export default function App() {
     { id:"historial",icon:"📋", label:"Historial"},
   ];
 
+  function CatBtn({ cat, size="md" }) {
+    const spent  = totals[cat.id]||0;
+    const budget = md.budgets?.[cat.id]||0;
+    const ok     = budget>0 && spent<=budget;
+    const over   = budget>0 && spent>budget;
+    const v      = cat.prorrated ? calcVariance(budget, pStart, pEnd, spent) : null;
+    const sel    = form.category===cat.id;
+
+    if (size==="xl") return (
+      <button style={{
+        display:"flex", flexDirection:"row", alignItems:"center", justifyContent:"space-between",
+        padding:"32px 24px", borderRadius:20, border:"2px solid", cursor:"pointer",
+        width:"100%", boxSizing:"border-box",
+        borderColor: sel?"#22d3ee": over?"#f87171": ok?"#4ade80":"#2a3a4a",
+        background:  sel?"#164e6388": over?"#3b091066": ok?"#14532d44":"#1a1a2e",
+        transition:"all 0.15s",
+      }} onClick={()=>selectCat(cat.id)}>
+        <div style={{display:"flex",alignItems:"center",gap:14}}>
+          <span style={{fontSize:38}}>{cat.icon}</span>
+          <div style={{textAlign:"left"}}>
+            <div style={{color:"#e2e8f0",fontSize:16,fontWeight:800}}>{cat.label}</div>
+            {budget>0&&<div style={{fontSize:12,fontWeight:700,color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
+              ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
+            </div>}
+          </div>
+        </div>
+        {v&&<span style={{fontSize:15,fontWeight:800,color:v.variance<=0?"#4ade80":"#f87171",background:v.variance<=0?"#14532d66":"#7f1d1d66",borderRadius:10,padding:"5px 14px"}}>
+          {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}` : `-${v.variance.toLocaleString("es-AR")}`}
+        </span>}
+      </button>
+    );
+
+    if (size==="lg") return (
+      <button style={{
+        display:"flex", flexDirection:"column", alignItems:"center",
+        padding:"12px 6px", borderRadius:18, border:"2px solid", cursor:"pointer",
+        borderColor: sel?"#22d3ee": over?"#f87171": ok?"#4ade80":"#2a3a4a",
+        background:  sel?"#164e6388": over?"#3b091066": ok?"#14532d44":"#1a1a2e",
+        transition:"all 0.15s",
+      }} onClick={()=>selectCat(cat.id)}>
+        <span style={{fontSize:30}}>{cat.icon}</span>
+        <span style={{color:"#e2e8f0",fontSize:13,marginTop:5,textAlign:"center",fontWeight:700}}>{cat.label}</span>
+        {budget>0&&<span style={{fontSize:11,fontWeight:700,marginTop:3,color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
+          ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
+        </span>}
+        {v&&<span style={{fontSize:12,fontWeight:800,marginTop:4,color:v.variance<=0?"#4ade80":"#f87171",background:v.variance<=0?"#14532d66":"#7f1d1d66",borderRadius:8,padding:"3px 10px"}}>
+          {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}` : `-${v.variance.toLocaleString("es-AR")}`}
+        </span>}
+      </button>
+    );
+
+    return (
+      <button style={{
+        display:"flex", flexDirection:"column", alignItems:"center",
+        padding:"7px 2px", borderRadius:10, border:"1.5px solid", cursor:"pointer",
+        borderColor: sel?"#22d3ee": over?"#f87171": ok?"#4ade80":"#2a3a4a",
+        background:  sel?"#164e6344": over?"#3b091066": ok?"#14532d44":"#1a1a2e",
+        transition:"all 0.15s",
+      }} onClick={()=>selectCat(cat.id)}>
+        <span style={{fontSize:17}}>{cat.icon}</span>
+        <span style={{color:"#cbd5e1",fontSize:9,marginTop:2,textAlign:"center",fontWeight:600}}>{cat.label}</span>
+        {budget>0&&<span style={{fontSize:8,fontWeight:700,marginTop:1,color:over?"#f87171":ok?"#4ade80":"#64748b"}}>
+          ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
+        </span>}
+      </button>
+    );
+  }
+
   return (
     <div style={S.root}><div style={S.app}>
 
-      {/* HEADER */}
       <div style={S.header}>
         <div style={S.headerTop}>
           <button style={S.navBtn} onClick={()=>{ const p=prevPeriod(period); if(isPeriodAllowed(p)) setPeriod(p); }}>‹</button>
@@ -252,7 +282,7 @@ export default function App() {
             <div style={S.heroRow}>
               <div style={S.heroCard}>
                 <span style={S.heroCaption}>disponible</span>
-                <span style={{...S.heroAmt, color:available>=0?"#a5b4fc":"#f87171"}}>${available.toLocaleString("es-AR")}</span>
+                <span style={{...S.heroAmt,color:available>=0?"#a5b4fc":"#f87171"}}>${available.toLocaleString("es-AR")}</span>
               </div>
               <div style={S.heroDivider}/>
               <div style={S.heroCard}>
@@ -262,126 +292,32 @@ export default function App() {
               <div style={S.heroDivider}/>
               <div style={S.heroCard}>
                 <span style={S.heroCaption}>gastado</span>
-                <span style={{...S.heroAmt, color:"#f87171"}}>${totalSpent.toLocaleString("es-AR")}</span>
+                <span style={{...S.heroAmt,color:"#f87171"}}>${totalSpent.toLocaleString("es-AR")}</span>
               </div>
             </div>
           </div>
           <button style={S.navBtn} onClick={()=>setPeriod(nextPeriod(period))}>›</button>
         </div>
-        <div style={S.fraseBox}>
-          <span style={S.fraseText}>✨ {frase}</span>
-        </div>
       </div>
 
-      {/* CONTENT */}
       <div style={S.content}>
 
-        {/* ── GASTOS ── */}
         {view==="gastos" && (
           <div style={S.section}>
-
-            {/* ROW 1: Supermercado — full width */}
-            {(()=>{
-              const cat = CATEGORIES.find(c=>c.id==="supermercado");
-              const spent  = totals[cat.id]||0;
-              const budget = md.budgets?.[cat.id]||0;
-              const ok     = budget>0 && spent<=budget;
-              const over   = budget>0 && spent>budget;
-              const v      = calcVariance(budget, pStart, pEnd, spent);
-              const sel    = form.category===cat.id;
-              return (
-                <button style={{
-                  display:"flex", flexDirection:"row", alignItems:"center", justifyContent:"space-between",
-                  padding:"20px 24px", borderRadius:20, border:"2px solid", cursor:"pointer", width:"100%", boxSizing:"border-box",
-                  borderColor: sel?"#22d3ee": over?"#f87171": ok?"#4ade80":"#2a3a4a",
-                  background:  sel?"#164e6388": over?"#3b091066": ok?"#14532d44":"#1a1a2e",
-                  transform: sel?"scale(1.02)":"scale(1)", transition:"all 0.15s",
-                }} onClick={()=>selectCat(cat.id)}>
-                  <div style={{display:"flex",alignItems:"center",gap:14}}>
-                    <span style={{fontSize:38}}>{cat.icon}</span>
-                    <div style={{textAlign:"left"}}>
-                      <div style={{color:"#e2e8f0",fontSize:16,fontWeight:800}}>{cat.label}</div>
-                      {budget>0&&<div style={{fontSize:12,fontWeight:700,color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
-                        ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
-                      </div>}
-                    </div>
-                  </div>
-                  {v&&<span style={{fontSize:15,fontWeight:800,
-                    color:v.variance<=0?"#4ade80":"#f87171",
-                    background:v.variance<=0?"#14532d66":"#7f1d1d66",
-                    borderRadius:10,padding:"5px 14px"}}>
-                    {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}` : `-${v.variance.toLocaleString("es-AR")}`}
-                  </span>}
-                </button>
-              );
-            })()}
-
-            {/* ROW 2: Gustos + Higiene — 2 cols */}
-            <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10}}>
-              {["salidas","higiene"].map(id => {
-                const cat = CATEGORIES.find(c=>c.id===id);
-                const spent  = totals[cat.id]||0;
-                const budget = md.budgets?.[cat.id]||0;
-                const ok     = budget>0 && spent<=budget;
-                const over   = budget>0 && spent>budget;
-                const v      = cat.prorrated ? calcVariance(budget, pStart, pEnd, spent) : null;
-                const sel    = form.category===cat.id;
-                return (
-                  <button key={cat.id} style={{
-                    display:"flex", flexDirection:"column", alignItems:"center",
-                    padding:"18px 6px", borderRadius:18, border:"2px solid", cursor:"pointer",
-                    borderColor: sel?"#22d3ee": over?"#f87171": ok?"#4ade80":"#2a3a4a",
-                    background:  sel?"#164e6388": over?"#3b091066": ok?"#14532d44":"#1a1a2e",
-                    transform: sel?"scale(1.04)":"scale(1)", transition:"all 0.15s",
-                  }} onClick={()=>selectCat(cat.id)}>
-                    <span style={{fontSize:30}}>{cat.icon}</span>
-                    <span style={{color:"#e2e8f0",fontSize:13,marginTop:5,textAlign:"center",fontWeight:700}}>{cat.label}</span>
-                    {budget>0&&<span style={{fontSize:11,fontWeight:700,marginTop:3,color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
-                      ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
-                    </span>}
-                    {v&&<span style={{fontSize:12,fontWeight:800,marginTop:4,
-                      color:v.variance<=0?"#4ade80":"#f87171",
-                      background:v.variance<=0?"#14532d66":"#7f1d1d66",
-                      borderRadius:8,padding:"3px 10px"}}>
-                      {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}` : `-${v.variance.toLocaleString("es-AR")}`}
-                    </span>}
-                  </button>
-                );
-              })}
+            <CatBtn cat={CATEGORIES.find(c=>c.id==="supermercado")} size="xl"/>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <CatBtn cat={CATEGORIES.find(c=>c.id==="salidas")} size="lg"/>
+              <CatBtn cat={CATEGORIES.find(c=>c.id==="higiene")} size="lg"/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:5}}>
+              {["transporte","alquiler","servicios","ropo"].map(id=>(
+                <CatBtn key={id} cat={CATEGORIES.find(c=>c.id===id)} size="sm"/>
+              ))}
             </div>
 
-            {/* ROW 3: Transporte, Alquiler, Servicios, Ropo — 4 cols small */}
-            <div style={{display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:5}}>
-              {["transporte","alquiler","servicios","ropo"].map(id => {
-                const cat = CATEGORIES.find(c=>c.id===id);
-                const spent  = totals[cat.id]||0;
-                const budget = md.budgets?.[cat.id]||0;
-                const ok     = budget>0 && spent<=budget;
-                const over   = budget>0 && spent>budget;
-                const sel    = form.category===cat.id;
-                return (
-                  <button key={cat.id} style={{
-                    display:"flex", flexDirection:"column", alignItems:"center",
-                    padding:"7px 2px", borderRadius:10, border:"1.5px solid", cursor:"pointer",
-                    borderColor: sel?"#22d3ee": over?"#f87171": ok?"#4ade80":"#2a3a4a",
-                    background:  sel?"#164e6344": over?"#3b091066": ok?"#14532d44":"#1a1a2e",
-                    transform: sel?"scale(1.04)":"scale(1)", transition:"all 0.15s",
-                  }} onClick={()=>selectCat(cat.id)}>
-                    <span style={{fontSize:17}}>{cat.icon}</span>
-                    <span style={{color:"#cbd5e1",fontSize:9,marginTop:2,textAlign:"center",fontWeight:600}}>{cat.label}</span>
-                    {budget>0&&<span style={{fontSize:8,fontWeight:700,marginTop:1,color:over?"#f87171":ok?"#4ade80":"#64748b"}}>
-                      ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
-                    </span>}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* MONTO */}
-            <input style={S.bigInput} type="number" inputMode="decimal" placeholder="0"
+            <input ref={amountInputRef} style={S.bigInput} type="number" inputMode="decimal" placeholder="0"
               value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}
-              onKeyDown={e=>{ if(e.key==="Enter") addFromForm(); }}
-              autoFocus/>
+              onKeyDown={e=>{ if(e.key==="Enter") addFromForm(); }} autoFocus/>
             <input style={S.inputSm} type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/>
             {!form.showNote
               ? <button style={S.noteToggle} onClick={()=>setForm(f=>({...f,showNote:true}))}>+ agregar nota</button>
@@ -391,25 +327,21 @@ export default function App() {
 
             <div style={{display:"flex",gap:8,marginTop:2}}>
               <button style={{...S.ghostBtn,flex:1,margin:0,padding:"9px",fontSize:11}} onClick={doArqueo}>📊 Arquear período</button>
-              {undoStack.length>0&&(
-                <button style={{...S.ghostBtn,flex:1,margin:0,padding:"9px",fontSize:11,color:"#f87171",borderColor:"#f8717166"}} onClick={undo}>↩ Deshacer</button>
-              )}
+              {undoStack.length>0&&<button style={{...S.ghostBtn,flex:1,margin:0,padding:"9px",fontSize:11,color:"#f87171",borderColor:"#f8717166"}} onClick={undo}>↩ Deshacer</button>}
             </div>
 
-            {/* CUBRIR EXCEDENTES CON AHORRO */}
             {currentSavings>0 && hasOverages && (
               <div style={{...S.catCard,borderColor:"#92400e",background:"#1c150a"}}>
                 <div style={{color:"#fbbf24",fontSize:12,fontWeight:700,marginBottom:8}}>💛 Cubrir excedente con ahorro</div>
-                {CATEGORIES.filter(c=>!c.isSavings).map(cat=>{
-                  const spent = totals[cat.id]||0;
-                  const budget = md.budgets?.[cat.id]||0;
-                  if (!(budget>0 && spent>budget)) return null;
-                  const excess = spent-budget;
+                {SPEND_CATS.map(cat=>{
+                  const spent=totals[cat.id]||0, budget=md.budgets?.[cat.id]||0;
+                  if (!(budget>0&&spent>budget)) return null;
+                  const excess=spent-budget;
                   return (
                     <div key={cat.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                       <span style={{color:"#e2e8f0",fontSize:12}}>{cat.icon} {cat.label} <span style={{color:"#f87171"}}>+${excess.toLocaleString("es-AR")}</span></span>
                       <button style={{background:"#d97706",color:"#fff",border:"none",borderRadius:8,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}
-                        onClick={()=>coverFromSavings(cat.id, excess)}>Cubrir</button>
+                        onClick={()=>coverFromSavings(cat.id,excess)}>Cubrir</button>
                     </div>
                   );
                 })}
@@ -418,53 +350,39 @@ export default function App() {
           </div>
         )}
 
-        {/* ── LÍMITES ── */}
         {view==="limites" && (
           <div style={S.section}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
               <p style={{...S.sectionTitle,margin:0}}>LÍMITES · {periodLabel(period)}</p>
               <div style={{textAlign:"right"}}>
                 <span style={{color:"#475569",fontSize:9,textTransform:"uppercase",letterSpacing:1}}>monto restante</span>
-                <div style={{color:montoRestante>=0?"#4ade80":"#f87171",fontSize:15,fontWeight:800}}>
-                  ${montoRestante.toLocaleString("es-AR")}
-                </div>
+                <div style={{color:montoRestante>=0?"#4ade80":"#f87171",fontSize:15,fontWeight:800}}>${montoRestante.toLocaleString("es-AR")}</div>
               </div>
             </div>
-            {CATEGORIES.map(cat=>{
-              const spent  = cat.isSavings ? currentSavings : (totals[cat.id]||0);
+
+            <SavingsCard
+              currentSavings={currentSavings}
+              onAdd={addSavings}
+              onEdit={editSavings}
+              onArqueo={doArqueo}
+              onUndo={undoStack.length>0?undo:null}
+            />
+
+            {SPEND_CATS.map(cat=>{
+              const spent  = totals[cat.id]||0;
               const budget = md.budgets?.[cat.id]||0;
               const over   = budget>0 && spent>budget;
               const pct    = budget>0 ? Math.min((spent/budget)*100,100) : 0;
               const v      = cat.prorrated ? calcVariance(budget, pStart, pEnd, spent) : null;
-              const isSav  = cat.isSavings;
               return (
-                {isSav ? (
-                  <SavingsCard
-                    currentSavings={currentSavings}
-                    onAdd={(amt) => {
-                      const entry = { id:Date.now(), amount:amt, category:"ahorro", note:"Ahorro", date:toDateStr() };
-                      persist({ ...data, [key]: { ...md, expenses:[...(md.expenses||[]), entry] } });
-                      showToast(`💛 +$${amt.toLocaleString("es-AR")} al ahorro`,"good");
-                    }}
-                    onEdit={(val) => {
-                      const diff = val - currentSavings;
-                      const entry = { id:Date.now(), amount:diff, category:"ahorro", note:"Ajuste manual", date:toDateStr() };
-                      persist({ ...data, [key]: { ...md, expenses:[...(md.expenses||[]), entry] } });
-                      showToast("Ahorro actualizado ✓","good");
-                    }}
-                    onArqueo={doArqueo}
-                    onUndo={undoStack.length>0 ? undo : null}
-                  />
-                ) : (
                 <div key={cat.id} style={S.catCard}>
                   <div style={{...S.catHeader,marginBottom:budget>0?8:0}}>
                     <span style={S.rowLabel}>{cat.icon} {cat.label}</span>
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
                       {v&&<span style={{fontSize:11,fontWeight:800,color:v.variance<=0?"#4ade80":"#f87171"}}>
-                        {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}` : `-${v.variance.toLocaleString("es-AR")}`}
+                        {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}`:` -${v.variance.toLocaleString("es-AR")}`}
                       </span>}
-                      <input style={S.rowInput}
-                        type="number" inputMode="decimal" placeholder="Límite"
+                      <input style={S.rowInput} type="number" inputMode="decimal" placeholder="Límite"
                         value={budget||""} onChange={e=>setBudget(cat.id,e.target.value)}/>
                     </div>
                   </div>
@@ -474,25 +392,25 @@ export default function App() {
                         <div style={{...S.barFill,width:`${pct}%`,backgroundColor:over?"#f87171":cat.color}}/>
                         {v&&v.pctTime>0&&<div style={{position:"absolute",top:0,bottom:0,left:`${v.pctTime}%`,width:2,backgroundColor:"rgba(255,255,255,0.3)"}}/>}
                       </div>
-                      {v&&<div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
-                        <span style={S.metaText}>${v.dailyRate}/día</span>
-                        <span style={S.metaText}>Esp: ${v.expected.toLocaleString("es-AR")} · {v.daysLeft}d</span>
-                      </div>}
-                      {!v&&<div style={{marginTop:4}}>
-                        <span style={{...S.metaText,color:over?"#f87171":"#64748b"}}>
-                          {over?`Excedente: $${(spent-budget).toLocaleString("es-AR")}`:`Restante: $${(budget-spent).toLocaleString("es-AR")}`}
-                        </span>
-                      </div>}
+                      {v
+                        ? <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
+                            <span style={S.metaText}>${v.dailyRate}/día</span>
+                            <span style={S.metaText}>Esp: ${v.expected.toLocaleString("es-AR")} · {v.daysLeft}d</span>
+                          </div>
+                        : <div style={{marginTop:4}}>
+                            <span style={{...S.metaText,color:over?"#f87171":"#64748b"}}>
+                              {over?`Excedente: $${(spent-budget).toLocaleString("es-AR")}`:`Restante: $${(budget-spent).toLocaleString("es-AR")}`}
+                            </span>
+                          </div>
+                      }
                     </>
                   )}
                 </div>
-                )}
               );
             })}
           </div>
         )}
 
-        {/* ── INGRESOS ── */}
         {view==="ingresos" && (
           <div style={S.section}>
             <p style={S.sectionTitle}>INGRESOS · {periodLabel(period)}</p>
@@ -510,13 +428,11 @@ export default function App() {
           </div>
         )}
 
-        {/* ── HISTORIAL ── */}
         {view==="historial" && (
           <History expenses={md.expenses||[]} onDelete={deleteExpense} onUpdate={updateExpense}/>
         )}
       </div>
 
-      {/* BOTTOM NAV — 4 tabs */}
       <div style={S.bottomNav}>
         {NAV.map(n=>{
           const active = view===n.id;
@@ -529,7 +445,7 @@ export default function App() {
               borderTop: active?"2px solid #22d3ee":"2px solid transparent",
               background: "transparent",
             }} onClick={()=>setView(n.id)}>
-              <span style={{fontSize:isMain?28:17,transition:"all 0.15s"}}>{n.icon}</span>
+              <span style={{fontSize:isMain?28:17}}>{n.icon}</span>
               <span style={{fontSize:isMain?12:9,marginTop:1,fontWeight:active?800:400,letterSpacing:isMain?1:0}}>{n.label}</span>
             </button>
           );
@@ -546,38 +462,34 @@ export default function App() {
   );
 }
 
-
 function SavingsCard({ currentSavings, onAdd, onEdit, onArqueo, onUndo }) {
-  const [mode, setMode] = useState(null); // null | "add" | "edit"
+  const [mode, setMode] = useState(null);
   const [val, setVal]   = useState("");
 
   function handleAdd() {
     const amt = parseFloat(val);
-    if (!amt || amt <= 0) return;
-    onAdd(amt);
-    setVal(""); setMode(null);
+    if (!amt||amt<=0) return;
+    onAdd(amt); setVal(""); setMode(null);
   }
-
   function handleEdit() {
     const amt = parseFloat(val);
     if (isNaN(amt)) return;
-    onEdit(amt);
-    setVal(""); setMode(null);
+    onEdit(amt); setVal(""); setMode(null);
   }
 
   return (
-    <div style={{...S.catCard, borderColor:"#92400e", background:"#1c150a"}}>
-      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
+    <div style={{...S.catCard,borderColor:"#92400e",background:"#1c150a"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
         <div>
-          <div style={{color:"#fbbf24", fontSize:14, fontWeight:800}}>🔒 Ahorro</div>
-          <div style={{color:"#92400e", fontSize:10, marginTop:1}}>No se toca</div>
+          <div style={{color:"#fbbf24",fontSize:14,fontWeight:800}}>🔒 Ahorro</div>
+          <div style={{color:"#92400e",fontSize:10,marginTop:1}}>No se toca · viaja entre períodos</div>
         </div>
-        <span style={{color:"#fbbf24", fontSize:22, fontWeight:800}}>${currentSavings.toLocaleString("es-AR")}</span>
+        <span style={{color:"#fbbf24",fontSize:22,fontWeight:800}}>${currentSavings.toLocaleString("es-AR")}</span>
       </div>
 
-      {mode==="add" && (
-        <div style={{display:"flex", gap:8, marginBottom:8}}>
-          <input style={{...S.rowInput, flex:1, width:"auto", color:"#fbbf24", borderColor:"#92400e"}}
+      {mode==="add"&&(
+        <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"center"}}>
+          <input style={{...S.rowInput,flex:1,width:"auto",color:"#fbbf24",borderColor:"#92400e"}}
             type="number" inputMode="decimal" placeholder="Monto" autoFocus
             value={val} onChange={e=>setVal(e.target.value)}
             onKeyDown={e=>{ if(e.key==="Enter") handleAdd(); }}/>
@@ -585,10 +497,9 @@ function SavingsCard({ currentSavings, onAdd, onEdit, onArqueo, onUndo }) {
           <button style={{background:"none",color:"#64748b",border:"1px solid #334155",borderRadius:8,padding:"8px 12px",cursor:"pointer"}} onClick={()=>{setMode(null);setVal("");}}>✕</button>
         </div>
       )}
-
-      {mode==="edit" && (
-        <div style={{display:"flex", gap:8, marginBottom:8}}>
-          <input style={{...S.rowInput, flex:1, width:"auto", color:"#fbbf24", borderColor:"#92400e"}}
+      {mode==="edit"&&(
+        <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"center"}}>
+          <input style={{...S.rowInput,flex:1,width:"auto",color:"#fbbf24",borderColor:"#92400e"}}
             type="number" inputMode="decimal" placeholder="Nuevo total" autoFocus
             value={val} onChange={e=>setVal(e.target.value)}
             onKeyDown={e=>{ if(e.key==="Enter") handleEdit(); }}/>
@@ -597,7 +508,7 @@ function SavingsCard({ currentSavings, onAdd, onEdit, onArqueo, onUndo }) {
         </div>
       )}
 
-      <div style={{display:"flex", gap:6, flexWrap:"wrap"}}>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
         <button style={{...S.ghostBtn,margin:0,padding:"7px 12px",fontSize:11,color:"#fbbf24",borderColor:"#92400e88"}} onClick={()=>setMode("add")}>+ Cargar</button>
         <button style={{...S.ghostBtn,margin:0,padding:"7px 12px",fontSize:11}} onClick={()=>setMode("edit")}>✏️ Editar</button>
         <button style={{...S.ghostBtn,margin:0,padding:"7px 12px",fontSize:11}} onClick={onArqueo}>📊 Arquear</button>
