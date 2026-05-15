@@ -128,7 +128,7 @@ export default function App() {
   const totals         = getTotals();
   const carriedSavings = getCarriedSavings(data, period);
   const currentSavings = carriedSavings + (totals["ahorro"]||0);
-  const totalIncome    = Object.values(md.incomes||{}).reduce((a,b)=>a+b,0);
+  const totalIncome    = Object.values(md.incomes||{}).reduce((a,b)=>a+(Number(b)||0),0);
   const totalSpent     = SPEND_CATS.reduce((a,c)=>a+(totals[c.id]||0),0);
   const available      = totalIncome - totalSpent - (totals["ahorro"]||0);
   const totalBudgets   = Object.values(md.budgets||{}).reduce((a,b)=>a+b,0);
@@ -271,6 +271,10 @@ export default function App() {
     );
   }
 
+  const today = new Date(); today.setHours(0,0,0,0);
+  const pEndDate = periodEnd(period); pEndDate.setHours(0,0,0,0);
+  const daysLeftPeriod = Math.max(0, Math.round((pEndDate - today) / 86400000));
+
   return (
     <div style={S.root}><div style={S.app}>
 
@@ -278,7 +282,14 @@ export default function App() {
         <div style={S.headerTop}>
           <button style={S.navBtn} onClick={()=>{ const p=prevPeriod(period); if(isPeriodAllowed(p)) setPeriod(p); }}>‹</button>
           <div style={S.headerCenter}>
-            <span style={S.monthTitle}>{periodLabel(period)}</span>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={S.monthTitle}>{periodLabel(period)}</span>
+              <span style={{
+                background: daysLeftPeriod<=5?"#7f1d1d":daysLeftPeriod<=10?"#78350f":"#1e3a2e",
+                color:      daysLeftPeriod<=5?"#fca5a5":daysLeftPeriod<=10?"#fcd34d":"#86efac",
+                fontSize:10, fontWeight:800, borderRadius:8, padding:"3px 8px", letterSpacing:0.5
+              }}>{daysLeftPeriod}d</span>
+            </div>
             <div style={S.heroRow}>
               <div style={S.heroCard}>
                 <span style={S.heroCaption}>disponible</span>
@@ -318,10 +329,12 @@ export default function App() {
             <input ref={amountInputRef} style={S.bigInput} type="number" inputMode="decimal" placeholder="0"
               value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}
               onKeyDown={e=>{ if(e.key==="Enter") addFromForm(); }} autoFocus/>
-            <input style={S.inputSm} type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/>
             {!form.showNote
               ? <button style={S.noteToggle} onClick={()=>setForm(f=>({...f,showNote:true}))}>+ agregar nota</button>
-              : <input style={S.inputSm} type="text" placeholder="Nota..." value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))} autoFocus/>
+              : <div style={{display:"flex",gap:6}}>
+                  <input style={{...S.inputSm,flex:1}} type="text" placeholder="Nota..." value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))} autoFocus/>
+                  <input style={{...S.inputSm,width:130,flex:"none"}} type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/>
+                </div>
             }
             <button style={S.primaryBtn} onClick={addFromForm}>👌 Registrar</button>
 
@@ -329,6 +342,34 @@ export default function App() {
               <button style={{...S.ghostBtn,flex:1,margin:0,padding:"9px",fontSize:11}} onClick={doArqueo}>📊 Arquear período</button>
               {undoStack.length>0&&<button style={{...S.ghostBtn,flex:1,margin:0,padding:"9px",fontSize:11,color:"#f87171",borderColor:"#f8717166"}} onClick={undo}>↩ Deshacer</button>}
             </div>
+
+            {/* Últimos 5 movimientos */}
+            {(md.expenses||[]).length>0 && (() => {
+              const recent = [...(md.expenses||[])].sort((a,b)=>b.id-a.id).slice(0,5);
+              return (
+                <div style={{marginTop:4}}>
+                  <p style={S.sectionTitle}>ÚLTIMOS MOVIMIENTOS</p>
+                  {recent.map(e=>{
+                    const cat = CATEGORIES.find(c=>c.id===e.category);
+                    return (
+                      <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 4px",borderBottom:"1px solid #1e2a3a"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{fontSize:16}}>{cat?.icon}</span>
+                          <div>
+                            <span style={{color:"#cbd5e1",fontSize:12,fontWeight:600}}>{cat?.label}</span>
+                            {e.note&&<span style={{color:"#475569",fontSize:11}}> · {e.note}</span>}
+                          </div>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{color:cat?.color||"#818cf8",fontWeight:700,fontSize:13}}>${e.amount.toLocaleString("es-AR")}</span>
+                          <button style={{...S.editBtn,fontSize:11,width:24,height:24,color:"#475569"}} onClick={()=>deleteExpense(e.id)}>✕</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
 
             {currentSavings>0 && hasOverages && (
               <div style={{...S.catCard,borderColor:"#92400e",background:"#1c150a"}}>
@@ -610,3 +651,4 @@ const S = {
   hint:        { color:"#334155", fontSize:13, textAlign:"center", padding:"20px 0" },
   toast:       { position:"fixed", bottom:82, left:"50%", transform:"translateX(-50%)", padding:"14px 28px", borderRadius:24, fontSize:15, fontWeight:800, zIndex:999, whiteSpace:"nowrap", fontFamily:"inherit", boxShadow:"0 4px 24px rgba(0,0,0,0.4)" },
 };
+
