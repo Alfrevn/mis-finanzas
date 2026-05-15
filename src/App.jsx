@@ -62,8 +62,33 @@ function calcVariance(budget, startDate, endDate, spent) {
   return { expected, variance, daysLeft, dailyRate: parseFloat(dailyRate.toFixed(2)), pctTime };
 }
 
+function sanitizeData(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  const out = {};
+  Object.entries(raw).forEach(([pkey, pdata]) => {
+    if (!pdata || typeof pdata !== "object") return;
+    const incomes = {};
+    Object.entries(pdata.incomes||{}).forEach(([k,v]) => { incomes[k] = Number(v)||0; });
+    const budgets = {};
+    Object.entries(pdata.budgets||{}).forEach(([k,v]) => { budgets[k] = Number(v)||0; });
+    const expenses = (pdata.expenses||[]).map(e => ({...e, amount: Number(e.amount)||0}));
+    out[pkey] = { ...pdata, incomes, budgets, expenses };
+  });
+  return out;
+}
+
 function loadData() {
-  try { const r = localStorage.getItem("finanzas_v8"); return r ? JSON.parse(r) : {}; }
+  try {
+    const r = localStorage.getItem("finanzas_v8");
+    if (!r) return {};
+    const parsed = JSON.parse(r);
+    const clean = sanitizeData(parsed);
+    // si hubo diferencias, re-guardar ya saneado
+    if (JSON.stringify(parsed) !== JSON.stringify(clean)) {
+      localStorage.setItem("finanzas_v8", JSON.stringify(clean));
+    }
+    return clean;
+  }
   catch { return {}; }
 }
 function saveData(d) { try { localStorage.setItem("finanzas_v8", JSON.stringify(d)); } catch {} }
@@ -131,7 +156,7 @@ export default function App() {
   const totalIncome    = Object.values(md.incomes||{}).reduce((a,b)=>a+(Number(b)||0),0);
   const totalSpent     = SPEND_CATS.reduce((a,c)=>a+(totals[c.id]||0),0);
   const available      = totalIncome - totalSpent - (totals["ahorro"]||0);
-  const totalBudgets   = Object.values(md.budgets||{}).reduce((a,b)=>a+b,0);
+  const totalBudgets   = Object.values(md.budgets||{}).reduce((a,b)=>a+(Number(b)||0),0);
   const montoRestante  = totalIncome - totalBudgets;
 
   const pStart = toDateStr(periodStart(period));
@@ -651,4 +676,3 @@ const S = {
   hint:        { color:"#334155", fontSize:13, textAlign:"center", padding:"20px 0" },
   toast:       { position:"fixed", bottom:82, left:"50%", transform:"translateX(-50%)", padding:"14px 28px", borderRadius:24, fontSize:15, fontWeight:800, zIndex:999, whiteSpace:"nowrap", fontFamily:"inherit", boxShadow:"0 4px 24px rgba(0,0,0,0.4)" },
 };
-
