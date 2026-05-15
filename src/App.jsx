@@ -91,6 +91,7 @@ export default function App() {
   const [form, setForm]         = useState({ amount:"", category:lastCat, note:"", date:toDateStr(), showNote:false });
   const [toast, setToast]       = useState(null);
   const [undoStack, setUndoStack] = useState([]);
+  const [flashCat, setFlashCat] = useState(null);
   const amountInputRef = useRef(null);
 
   const key = periodKey(period);
@@ -146,7 +147,10 @@ export default function App() {
     if (budget>0&&newSp<=budget)   showToast("✓ Dentro del límite 🎯","good");
     else if (budget>0&&newSp>budget) showToast("⚠️ Superaste el límite","warn");
     else                           showToast("Gasto registrado ✓","ok");
+    setFlashCat(form.category);
+    setTimeout(() => setFlashCat(null), 600);
     setForm(f=>({...f, amount:"", note:"", date:toDateStr(), showNote:false}));
+    setTimeout(() => { amountInputRef.current?.focus(); }, 80);
   }
 
   function deleteExpense(id) {
@@ -213,23 +217,19 @@ export default function App() {
 
     if (size==="xl") return (
       <button style={{
-        display:"flex", flexDirection:"row", alignItems:"center", justifyContent:"space-between",
+        display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
         padding:"32px 24px", borderRadius:20, border:"2px solid", cursor:"pointer",
         width:"100%", boxSizing:"border-box",
         borderColor: sel?"#22d3ee": over?"#f87171": ok?"#4ade80":"#2a3a4a",
         background:  sel?"#164e6388": over?"#3b091066": ok?"#14532d44":"#1a1a2e",
         transition:"all 0.15s",
       }} onClick={()=>selectCat(cat.id)}>
-        <div style={{display:"flex",alignItems:"center",gap:14}}>
-          <span style={{fontSize:38}}>{cat.icon}</span>
-          <div style={{textAlign:"left"}}>
-            <div style={{color:"#e2e8f0",fontSize:16,fontWeight:800}}>{cat.label}</div>
-            {budget>0&&<div style={{fontSize:12,fontWeight:700,color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
-              ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
-            </div>}
-          </div>
-        </div>
-        {v&&<span style={{fontSize:15,fontWeight:800,color:v.variance<=0?"#4ade80":"#f87171",background:v.variance<=0?"#14532d66":"#7f1d1d66",borderRadius:10,padding:"5px 14px"}}>
+        <span style={{fontSize:42}}>{cat.icon}</span>
+        <div style={{color:"#e2e8f0",fontSize:17,fontWeight:800,marginTop:8}}>{cat.label}</div>
+        {budget>0&&<div style={{fontSize:12,fontWeight:700,marginTop:3,color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
+          ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
+        </div>}
+        {v&&<span style={{fontSize:15,fontWeight:800,marginTop:6,color:v.variance<=0?"#4ade80":"#f87171",background:v.variance<=0?"#14532d66":"#7f1d1d66",borderRadius:10,padding:"5px 14px"}}>
           {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}` : `-${v.variance.toLocaleString("es-AR")}`}
         </span>}
       </button>
