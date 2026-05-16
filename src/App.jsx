@@ -123,8 +123,9 @@ export default function App() {
   const md  = data[key] || EMPTY;
 
   function persist(next) {
+    const clean = sanitizeData(next);
     setUndoStack(s => [...s.slice(-2), data]);
-    setData(next); saveData(next);
+    setData(clean); saveData(clean);
   }
   function undo() {
     if (!undoStack.length) return;
@@ -157,7 +158,7 @@ export default function App() {
   const totalSpent     = SPEND_CATS.reduce((a,c)=>a+(totals[c.id]||0),0);
   const available      = totalIncome - totalSpent - (totals["ahorro"]||0);
   const totalBudgets   = Object.values(md.budgets||{}).reduce((a,b)=>a+(Number(b)||0),0);
-  const montoRestante  = totalIncome - totalBudgets;
+  const montoRestante  = totalIncome - totalBudgets - currentSavings;
 
   const pStart = toDateStr(periodStart(period));
   const pEnd   = toDateStr(periodEnd(period));
