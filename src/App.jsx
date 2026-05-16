@@ -224,7 +224,8 @@ export default function App() {
     persist({ ...data, [key]: { ...md, budgets:{...(md.budgets||{}), [id]:parseFloat(val)||0} } });
   }
 
-  const hasOverages = SPEND_CATS.some(c=>(totals[c.id]||0)>(md.budgets?.[c.id]||1e9) && (md.budgets?.[c.id]||0)>0);
+  const [showDebug, setShowDebug] = useState(false);
+  const debugRaw = (() => { try { return localStorage.getItem("finanzas_v8") || "vacío"; } catch { return "error"; } })();
 
   const NAV = [
     { id:"gastos",   icon:"👌", label:"GASTOS"   },
@@ -309,7 +310,7 @@ export default function App() {
           <button style={S.navBtn} onClick={()=>{ const p=prevPeriod(period); if(isPeriodAllowed(p)) setPeriod(p); }}>‹</button>
           <div style={S.headerCenter}>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <span style={S.monthTitle}>{periodLabel(period)}</span>
+              <span style={S.monthTitle} onLongPress={()=>setShowDebug(true)} onClick={()=>{}} onDoubleClick={()=>setShowDebug(true)}>{periodLabel(period)}</span>
               <span style={{
                 background: daysLeftPeriod<=5?"#7f1d1d":daysLeftPeriod<=10?"#78350f":"#1e3a2e",
                 color:      daysLeftPeriod<=5?"#fca5a5":daysLeftPeriod<=10?"#fcd34d":"#86efac",
@@ -518,6 +519,22 @@ export default function App() {
           );
         })}
       </div>
+
+      {showDebug && (
+        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#0f0f1aee",zIndex:999,overflow:"auto",padding:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <span style={{color:"#22d3ee",fontWeight:800,fontSize:14}}>🔍 DIAGNÓSTICO localStorage</span>
+            <button style={{...S.ghostBtn,margin:0,padding:"6px 12px",fontSize:12}} onClick={()=>setShowDebug(false)}>✕ Cerrar</button>
+          </div>
+          <pre style={{color:"#e2e8f0",fontSize:10,whiteSpace:"pre-wrap",wordBreak:"break-all",background:"#1a1a2e",padding:12,borderRadius:12}}>
+            {JSON.stringify(JSON.parse(debugRaw==="vacío"?"{}":debugRaw), null, 2)}
+          </pre>
+          <button style={{...S.ghostBtn,width:"100%",margin:"12px 0 0",color:"#f87171",borderColor:"#f8717166"}}
+            onClick={()=>{ if(window.confirm("¿Borrar TODO? No hay vuelta atrás.")){ localStorage.removeItem("finanzas_v8"); window.location.reload(); } }}>
+            🗑 BORRAR TODO Y EMPEZAR DE CERO
+          </button>
+        </div>
+      )}
 
       {toast&&(
         <div style={{...S.toast,
