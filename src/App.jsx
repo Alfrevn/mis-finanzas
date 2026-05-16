@@ -1,4 +1,27 @@
-import { useState, useRef } from "react";
+import { useState, useRef, Component } from "react";
+
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e) { return { error: e }; }
+  render() {
+    if (this.state.error) return (
+      <div style={{background:"#0f0f1a",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,gap:16}}>
+        <div style={{fontSize:40}}>💥</div>
+        <div style={{color:"#f87171",fontWeight:800,fontSize:16,textAlign:"center"}}>Algo salió mal</div>
+        <div style={{color:"#64748b",fontSize:12,textAlign:"center",maxWidth:280}}>{this.state.error?.message}</div>
+        <button style={{background:"#818cf8",color:"#fff",border:"none",borderRadius:12,padding:"12px 24px",fontSize:14,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}
+          onClick={()=>{ try{localStorage.removeItem("finanzas_v8");}catch{} window.location.reload(); }}>
+          🗑 Limpiar datos y recargar
+        </button>
+        <button style={{background:"transparent",color:"#475569",border:"1px solid #2a3a4a",borderRadius:12,padding:"10px 24px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}
+          onClick={()=>this.setState({error:null})}>
+          Intentar de nuevo
+        </button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
 
 
 const CATEGORIES = [
@@ -108,7 +131,13 @@ function getCarriedSavings(data, period) {
   return Math.max(0, total);
 }
 
-export default function App() {
+function fmtARS(v) { return (Number(v)||0).toLocaleString("es-AR"); }
+
+export default function AppRoot() {
+  return <ErrorBoundary><App/></ErrorBoundary>;
+}
+
+function App() {
   const [period, setPeriod]     = useState(() => getPeriodForDate());
   const [view, setView]         = useState("gastos");
   const [data, setData]         = useState(loadData);
@@ -189,7 +218,7 @@ export default function App() {
   function addSavings(amt) {
     const entry = { id:Date.now(), amount:amt, category:"ahorro", note:"Ahorro", date:toDateStr() };
     persist({ ...data, [key]: { ...md, expenses:[...(md.expenses||[]), entry] } });
-    showToast(`💛 +$${amt.toLocaleString("es-AR")} al ahorro`,"good");
+    showToast(`💛 +$${fmtARS(amt)} al ahorro`,"good");
   }
   function editSavings(newTotal) {
     const diff = newTotal - currentSavings;
@@ -207,7 +236,7 @@ export default function App() {
     if (surplus<=0) { showToast("No hay excedente","warn"); return; }
     const entry = { id:Date.now(), amount:surplus, category:"ahorro", note:"Arqueo de período", date:toDateStr() };
     persist({ ...data, [key]: { ...md, expenses:[...(md.expenses||[]), entry] } });
-    showToast(`+$${surplus.toLocaleString("es-AR")} al ahorro 🏆`,"good");
+    showToast(`+$${fmtARS(surplus)} al ahorro 🏆`,"good");
   }
   function coverFromSavings(catId, excess) {
     const toUse = Math.min(excess, currentSavings);
@@ -215,7 +244,7 @@ export default function App() {
     const newBudget = (md.budgets?.[catId]||0) + toUse;
     const entry = { id:Date.now(), amount:-toUse, category:"ahorro", note:`↩ Cubrió ${CATEGORIES.find(c=>c.id===catId)?.label}`, date:toDateStr() };
     persist({ ...data, [key]: { ...md, budgets:{...(md.budgets||{}), [catId]:newBudget}, expenses:[...(md.expenses||[]), entry] } });
-    showToast(`$${toUse.toLocaleString("es-AR")} movidos del ahorro`,"ok");
+    showToast(`$${fmtARS(toUse)} movidos del ahorro`,"ok");
   }
   function setIncome(id, val) {
     persist({ ...data, [key]: { ...md, incomes:{...(md.incomes||{}), [id]:parseFloat(val)||0} } });
@@ -254,10 +283,10 @@ export default function App() {
         <span style={{fontSize:42}}>{cat.icon}</span>
         <div style={{color:"#e2e8f0",fontSize:17,fontWeight:800,marginTop:8}}>{cat.label}</div>
         {budget>0&&<div style={{fontSize:12,fontWeight:700,marginTop:3,color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
-          ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
+          ${fmtARS(spent)} / ${fmtARS(budget)}
         </div>}
         {v&&<span style={{fontSize:15,fontWeight:800,marginTop:6,color:v.variance<=0?"#4ade80":"#f87171",background:v.variance<=0?"#14532d66":"#7f1d1d66",borderRadius:10,padding:"5px 14px"}}>
-          {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}` : `-${v.variance.toLocaleString("es-AR")}`}
+          {v.variance<=0?`+${fmtARS(Math.abs(v.variance))}` : `-${fmtARS(v.variance)}`}
         </span>}
       </button>
     );
@@ -273,10 +302,10 @@ export default function App() {
         <span style={{fontSize:30}}>{cat.icon}</span>
         <span style={{color:"#e2e8f0",fontSize:13,marginTop:5,textAlign:"center",fontWeight:700}}>{cat.label}</span>
         {budget>0&&<span style={{fontSize:11,fontWeight:700,marginTop:3,color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
-          ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
+          ${fmtARS(spent)} / ${fmtARS(budget)}
         </span>}
         {v&&<span style={{fontSize:12,fontWeight:800,marginTop:4,color:v.variance<=0?"#4ade80":"#f87171",background:v.variance<=0?"#14532d66":"#7f1d1d66",borderRadius:8,padding:"3px 10px"}}>
-          {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}` : `-${v.variance.toLocaleString("es-AR")}`}
+          {v.variance<=0?`+${fmtARS(Math.abs(v.variance))}` : `-${fmtARS(v.variance)}`}
         </span>}
       </button>
     );
@@ -292,14 +321,14 @@ export default function App() {
         <span style={{fontSize:17}}>{cat.icon}</span>
         <span style={{color:"#cbd5e1",fontSize:9,marginTop:2,textAlign:"center",fontWeight:600}}>{cat.label}</span>
         {budget>0&&<span style={{fontSize:8,fontWeight:700,marginTop:1,color:over?"#f87171":ok?"#4ade80":"#64748b"}}>
-          ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
+          ${fmtARS(spent)} / ${fmtARS(budget)}
         </span>}
       </button>
     );
   }
 
   const today = new Date(); today.setHours(0,0,0,0);
-  const pEndDate = periodEnd(period); pEndDate.setHours(0,0,0,0);
+  const pEndDate = new Date(periodEnd(period)); pEndDate.setHours(0,0,0,0);
   const daysLeftPeriod = Math.max(0, Math.round((pEndDate - today) / 86400000));
 
   return (
@@ -320,17 +349,17 @@ export default function App() {
             <div style={S.heroRow}>
               <div style={S.heroCard}>
                 <span style={S.heroCaption}>disponible</span>
-                <span style={{...S.heroAmt,color:available>=0?"#a5b4fc":"#f87171"}}>${available.toLocaleString("es-AR")}</span>
+                <span style={{...S.heroAmt,color:available>=0?"#a5b4fc":"#f87171"}}>${fmtARS(available)}</span>
               </div>
               <div style={S.heroDivider}/>
               <div style={S.heroCard}>
                 <span style={S.heroCaption}>ingresos</span>
-                <span style={S.heroAmt}>${totalIncome.toLocaleString("es-AR")}</span>
+                <span style={S.heroAmt}>${fmtARS(totalIncome)}</span>
               </div>
               <div style={S.heroDivider}/>
               <div style={S.heroCard}>
                 <span style={S.heroCaption}>gastado</span>
-                <span style={{...S.heroAmt,color:"#f87171"}}>${totalSpent.toLocaleString("es-AR")}</span>
+                <span style={{...S.heroAmt,color:"#f87171"}}>${fmtARS(totalSpent)}</span>
               </div>
             </div>
           </div>
@@ -388,7 +417,7 @@ export default function App() {
                           </div>
                         </div>
                         <div style={{display:"flex",alignItems:"center",gap:8}}>
-                          <span style={{color:cat?.color||"#818cf8",fontWeight:700,fontSize:13}}>${e.amount.toLocaleString("es-AR")}</span>
+                          <span style={{color:cat?.color||"#818cf8",fontWeight:700,fontSize:13}}>${fmtARS(e.amount)}</span>
                           <button style={{...S.editBtn,fontSize:11,width:24,height:24,color:"#475569"}} onClick={()=>deleteExpense(e.id)}>✕</button>
                         </div>
                       </div>
@@ -407,7 +436,7 @@ export default function App() {
                   const excess=spent-budget;
                   return (
                     <div key={cat.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                      <span style={{color:"#e2e8f0",fontSize:12}}>{cat.icon} {cat.label} <span style={{color:"#f87171"}}>+${excess.toLocaleString("es-AR")}</span></span>
+                      <span style={{color:"#e2e8f0",fontSize:12}}>{cat.icon} {cat.label} <span style={{color:"#f87171"}}>+${fmtARS(excess)}</span></span>
                       <button style={{background:"#d97706",color:"#fff",border:"none",borderRadius:8,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}
                         onClick={()=>coverFromSavings(cat.id,excess)}>Cubrir</button>
                     </div>
@@ -424,7 +453,7 @@ export default function App() {
               <p style={{...S.sectionTitle,margin:0}}>LÍMITES · {periodLabel(period)}</p>
               <div style={{textAlign:"right"}}>
                 <span style={{color:"#475569",fontSize:9,textTransform:"uppercase",letterSpacing:1}}>monto restante</span>
-                <div style={{color:montoRestante>=0?"#4ade80":"#f87171",fontSize:15,fontWeight:800}}>${montoRestante.toLocaleString("es-AR")}</div>
+                <div style={{color:montoRestante>=0?"#4ade80":"#f87171",fontSize:15,fontWeight:800}}>${fmtARS(montoRestante)}</div>
               </div>
             </div>
 
@@ -448,7 +477,7 @@ export default function App() {
                     <span style={S.rowLabel}>{cat.icon} {cat.label}</span>
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
                       {v&&<span style={{fontSize:11,fontWeight:800,color:v.variance<=0?"#4ade80":"#f87171"}}>
-                        {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}`:` -${v.variance.toLocaleString("es-AR")}`}
+                        {v.variance<=0?`+${fmtARS(Math.abs(v.variance))}`:` -${fmtARS(v.variance)}`}
                       </span>}
                       <input style={S.rowInput} type="number" inputMode="decimal" placeholder="Límite"
                         value={budget||""} onChange={e=>setBudget(cat.id,e.target.value)}/>
@@ -463,11 +492,11 @@ export default function App() {
                       {v
                         ? <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
                             <span style={S.metaText}>${v.dailyRate}/día</span>
-                            <span style={S.metaText}>Esp: ${v.expected.toLocaleString("es-AR")} · {v.daysLeft}d</span>
+                            <span style={S.metaText}>Esp: ${fmtARS(v.expected)} · {v.daysLeft}d</span>
                           </div>
                         : <div style={{marginTop:4}}>
                             <span style={{...S.metaText,color:over?"#f87171":"#64748b"}}>
-                              {over?`Excedente: $${(spent-budget).toLocaleString("es-AR")}`:`Restante: $${(budget-spent).toLocaleString("es-AR")}`}
+                              {over?`Excedente: $${fmtARS(spent-budget)}`:`Restante: $${fmtARS(budget-spent)}`}
                             </span>
                           </div>
                       }
@@ -491,7 +520,7 @@ export default function App() {
             ))}
             <div style={{...S.row,borderColor:"#818cf8"}}>
               <span style={{...S.rowLabel,color:"#818cf8",fontWeight:700}}>Total</span>
-              <span style={{color:"#818cf8",fontWeight:700,fontSize:16}}>${totalIncome.toLocaleString("es-AR")}</span>
+              <span style={{color:"#818cf8",fontWeight:700,fontSize:16}}>${fmtARS(totalIncome)}</span>
             </div>
           </div>
         )}
@@ -527,7 +556,7 @@ export default function App() {
             <button style={{...S.ghostBtn,margin:0,padding:"6px 12px",fontSize:12}} onClick={()=>setShowDebug(false)}>✕ Cerrar</button>
           </div>
           <pre style={{color:"#e2e8f0",fontSize:10,whiteSpace:"pre-wrap",wordBreak:"break-all",background:"#1a1a2e",padding:12,borderRadius:12}}>
-            {JSON.stringify(JSON.parse(debugRaw==="vacío"?"{}":debugRaw), null, 2)}
+            {(() => { try { return JSON.stringify(JSON.parse(debugRaw==="vacío"?"{}":debugRaw), null, 2); } catch { return debugRaw; } })()}
           </pre>
           <button style={{...S.ghostBtn,width:"100%",margin:"12px 0 0",color:"#f87171",borderColor:"#f8717166"}}
             onClick={()=>{ if(window.confirm("¿Borrar TODO? No hay vuelta atrás.")){ localStorage.removeItem("finanzas_v8"); window.location.reload(); } }}>
@@ -568,7 +597,7 @@ function SavingsCard({ currentSavings, onAdd, onEdit, onArqueo, onUndo }) {
           <div style={{color:"#fbbf24",fontSize:14,fontWeight:800}}>🔒 Ahorro</div>
           <div style={{color:"#92400e",fontSize:10,marginTop:1}}>No se toca · viaja entre períodos</div>
         </div>
-        <span style={{color:"#fbbf24",fontSize:22,fontWeight:800}}>${currentSavings.toLocaleString("es-AR")}</span>
+        <span style={{color:"#fbbf24",fontSize:22,fontWeight:800}}>${fmtARS(currentSavings)}</span>
       </div>
 
       {mode==="add"&&(
@@ -643,7 +672,7 @@ function History({ expenses, onDelete, onUpdate }) {
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
                   <span style={{color:e.amount<0?"#f87171":cat?.color,fontWeight:700}}>
-                    {e.amount<0?"-":"+"}${Math.abs(e.amount||0).toLocaleString("es-AR")}
+                    {e.amount<0?"-":"+"}${fmtARS(Math.abs(e.amount||0))}
                   </span>
                   <button style={S.editBtn} onClick={()=>setEditId(e.id)}>✏️</button>
                 </div>
