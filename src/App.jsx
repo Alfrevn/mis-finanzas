@@ -749,8 +749,7 @@ const S = {
   heroDivider: { width:1, height:32, background:"#1e2a3a" },
   heroCaption: { color:"#475569", fontSize:9, letterSpacing:1, textTransform:"uppercase" },
   heroAmt:     { color:"#f1f5f9", fontSize:16, fontWeight:800 },
-  fraseBox:    { marginTop:8, padding:"7px 12px", background:"#1e2a3a", borderRadius:10, textAlign:"center" },
-  fraseText:   { color:"#a5f3fc", fontSize:12, fontStyle:"italic", fontFamily:"Georgia,serif", letterSpacing:0.3 },
+
   content:     { flex:1, overflowY:"auto", padding:"12px 12px 8px" },
   section:     { display:"flex", flexDirection:"column", gap:9 },
   sectionTitle:{ color:"#475569", fontSize:10, letterSpacing:2, textTransform:"uppercase", margin:"2px 0" },
