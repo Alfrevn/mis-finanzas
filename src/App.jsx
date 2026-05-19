@@ -128,7 +128,7 @@ export default function App() {
   const totalSpent     = SPEND_CATS.reduce((a,c)=>a+(totals[c.id]||0),0);
   const available      = totalIncome - totalSpent - (totals["ahorro"]||0);
   const totalBudgets   = Object.values(md.budgets||{}).reduce((a,b)=>a+b,0);
-  const montoRestante  = totalIncome - totalBudgets;
+  const montoRestante  = totalIncome - (totals["ahorro"]||0) - (totalBudgets - (md.budgets?.["ahorro"]||0));
 
   const pStart = toDateStr(periodStart(period));
   const pEnd   = toDateStr(periodEnd(period));
@@ -222,9 +222,7 @@ export default function App() {
         {budget>0&&<span style={{fontSize:13,fontWeight:700,marginTop:4,color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
           ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
         </span>}
-        {v&&<span style={{fontSize:14,fontWeight:800,marginTop:6,color:v.variance<=0?"#4ade80":"#f87171",background:v.variance<=0?"#14532d66":"#7f1d1d66",borderRadius:10,padding:"4px 14px"}}>
-          {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}` : `-${v.variance.toLocaleString("es-AR")}`}
-        </span>}
+        {v&&(()=>{const days=v.dailyRate>0?Math.round(Math.abs(v.variance)/v.dailyRate*10)/10:0;const sign=v.variance<=0?"+":"-";return <span style={{fontSize:14,fontWeight:800,marginTop:6,color:v.variance<=0?"#4ade80":"#f87171",background:v.variance<=0?"#14532d66":"#7f1d1d66",borderRadius:10,padding:"4px 14px"}}>{sign}{days}d</span>;})()}
       </button>
     );
 
@@ -242,9 +240,7 @@ export default function App() {
         {budget>0&&<span style={{fontSize:10,fontWeight:700,marginTop:3,color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
           ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
         </span>}
-        {v&&<span style={{fontSize:11,fontWeight:800,marginTop:3,color:v.variance<=0?"#4ade80":"#f87171",background:v.variance<=0?"#14532d66":"#7f1d1d66",borderRadius:8,padding:"2px 8px"}}>
-          {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}` : `-${v.variance.toLocaleString("es-AR")}`}
-        </span>}
+        {v&&(()=>{const days=v.dailyRate>0?Math.round(Math.abs(v.variance)/v.dailyRate*10)/10:0;const sign=v.variance<=0?"+":"-";return <span style={{fontSize:11,fontWeight:800,marginTop:3,color:v.variance<=0?"#4ade80":"#f87171",background:v.variance<=0?"#14532d66":"#7f1d1d66",borderRadius:8,padding:"2px 8px"}}>{sign}{days}d</span>;})()}
       </button>
     );
 
@@ -268,11 +264,26 @@ export default function App() {
   return (
     <div style={S.root}><div style={S.app}>
 
-      <div style={S.header}>
+      <div style={{...S.header, position:"sticky", top:0, zIndex:50}}>
         <div style={S.headerTop}>
           <button style={S.navBtn} onClick={()=>{ const p=prevPeriod(period); if(isPeriodAllowed(p)) setPeriod(p); }}>‹</button>
           <div style={S.headerCenter}>
-            <span style={S.monthTitle}>{periodLabel(period)}</span>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={S.monthTitle}>{periodLabel(period)}</span>
+              <span style={{color:"#475569",fontSize:12,fontWeight:700}}>
+                {(()=>{ const end=periodEnd(period); const today=new Date(); today.setHours(0,0,0,0); return Math.max(0,Math.round((end-today)/86400000))+"d"; })()}
+              </span>
+            </div>
+              <span style={{color:"#475569",fontSize:12,fontWeight:700,letterSpacing:1}}>
+                {(()=>{
+                  const end = periodEnd(period);
+                  const today = new Date(); today.setHours(0,0,0,0);
+                  const diff = Math.max(0, Math.round((end-today)/86400000));
+                  return diff+"d";
+                })()}
+              </span>
+            </div>
             <div style={S.heroRow}>
               <div style={S.heroCard}>
                 <span style={S.heroCaption}>disponible</span>
@@ -389,7 +400,7 @@ export default function App() {
                       {v
                         ? <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
                             <span style={S.metaText}>${v.dailyRate}/día</span>
-                            <span style={S.metaText}>Esp: ${v.expected.toLocaleString("es-AR")} · {v.daysLeft}d</span>
+                            <span style={S.metaText}>{v.daysLeft}d restantes</span>
                           </div>
                         : <div style={{marginTop:4}}>
                             <span style={{...S.metaText,color:over?"#f87171":"#64748b"}}>
