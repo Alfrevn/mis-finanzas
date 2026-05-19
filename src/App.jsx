@@ -1,35 +1,4 @@
-import { useState, useRef, Component } from "react";
-
-class ErrorBoundary extends Component {
-  constructor(props) { super(props); this.state = { error: null }; }
-  static getDerivedStateFromError(e) { return { error: e }; }
-  render() {
-    if (this.state.error) return (
-      <div style={{background:"#0f0f1a",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,gap:16}}>
-        <div style={{fontSize:40}}>💥</div>
-        <div style={{color:"#f87171",fontWeight:800,fontSize:16,textAlign:"center"}}>Algo salió mal</div>
-        <div style={{color:"#64748b",fontSize:12,textAlign:"center",maxWidth:280}}>{this.state.error?.message}</div>
-        <button style={{background:"#22d3ee",color:"#0f0f1a",border:"none",borderRadius:12,padding:"12px 24px",fontSize:14,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}
-          onClick={()=>{
-            try {
-              const raw = localStorage.getItem("finanzas_v8") || "{}";
-              const blob = new Blob([raw], {type:"application/json"});
-              const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-              a.download = `finanzas_backup_${new Date().toISOString().slice(0,10)}.json`; a.click();
-            } catch(e) { alert("No se pudo exportar: "+e.message); }
-          }}>
-          💾 Descargar mis datos antes de cerrar
-        </button>
-        <button style={{background:"transparent",color:"#475569",border:"1px solid #2a3a4a",borderRadius:12,padding:"10px 24px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}
-          onClick={()=>this.setState({error:null})}>
-          Intentar de nuevo
-        </button>
-      </div>
-    );
-    return this.props.children;
-  }
-}
-
+import { useState } from "react";
 
 const CATEGORIES = [
   { id: "supermercado", label: "Supermercado",       icon: "🛒", color: "#818cf8", prorrated: true,  isSavings: false },
@@ -92,33 +61,8 @@ function calcVariance(budget, startDate, endDate, spent) {
   return { expected, variance, daysLeft, dailyRate: parseFloat(dailyRate.toFixed(2)), pctTime };
 }
 
-function sanitizeData(raw) {
-  if (!raw || typeof raw !== "object") return {};
-  const out = {};
-  Object.entries(raw).forEach(([pkey, pdata]) => {
-    if (!pdata || typeof pdata !== "object") return;
-    const incomes = {};
-    Object.entries(pdata.incomes||{}).forEach(([k,v]) => { incomes[k] = Number(v)||0; });
-    const budgets = {};
-    Object.entries(pdata.budgets||{}).forEach(([k,v]) => { budgets[k] = Number(v)||0; });
-    const expenses = (pdata.expenses||[]).map(e => ({...e, amount: Number(e.amount)||0}));
-    out[pkey] = { ...pdata, incomes, budgets, expenses };
-  });
-  return out;
-}
-
 function loadData() {
-  try {
-    const r = localStorage.getItem("finanzas_v8");
-    if (!r) return {};
-    const parsed = JSON.parse(r);
-    const clean = sanitizeData(parsed);
-    // si hubo diferencias, re-guardar ya saneado
-    if (JSON.stringify(parsed) !== JSON.stringify(clean)) {
-      localStorage.setItem("finanzas_v8", JSON.stringify(clean));
-    }
-    return clean;
-  }
+  try { const r = localStorage.getItem("finanzas_v8"); return r ? JSON.parse(r) : {}; }
   catch { return {}; }
 }
 function saveData(d) { try { localStorage.setItem("finanzas_v8", JSON.stringify(d)); } catch {} }
@@ -138,13 +82,7 @@ function getCarriedSavings(data, period) {
   return Math.max(0, total);
 }
 
-function fmtARS(v) { return (Number(v)||0).toLocaleString("es-AR"); }
-
-export default function AppRoot() {
-  return <ErrorBoundary><App/></ErrorBoundary>;
-}
-
-function App() {
+export default function App() {
   const [period, setPeriod]     = useState(() => getPeriodForDate());
   const [view, setView]         = useState("gastos");
   const [data, setData]         = useState(loadData);
@@ -152,45 +90,13 @@ function App() {
   const [form, setForm]         = useState({ amount:"", category:lastCat, note:"", date:toDateStr(), showNote:false });
   const [toast, setToast]       = useState(null);
   const [undoStack, setUndoStack] = useState([]);
-  const [flashCat, setFlashCat] = useState(null);
-  const amountInputRef = useRef(null);
 
   const key = periodKey(period);
   const md  = data[key] || EMPTY;
 
-  function exportData() {
-    try {
-      const raw = localStorage.getItem("finanzas_v8") || "{}";
-      const blob = new Blob([raw], {type:"application/json"});
-      const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-      a.download = `finanzas_backup_${new Date().toISOString().slice(0,10)}.json`; a.click();
-      showToast("💾 Backup descargado","good");
-    } catch { showToast("Error al exportar","warn"); }
-  }
-
-  function importData(file) {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const parsed = JSON.parse(ev.target.result);
-        const clean = sanitizeData(parsed);
-        saveData(clean); setData(clean);
-        showToast("✅ Datos restaurados","good");
-        setShowDebug(false);
-      } catch { showToast("Archivo inválido","warn"); }
-    };
-    reader.readAsText(file);
-  }
-
-  function persist(updater) {
-    setData(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      const clean = sanitizeData(next);
-      setUndoStack(s => [...s.slice(-2), prev]);
-      saveData(clean);
-      return clean;
-    });
+  function persist(next) {
+    setUndoStack(s => [...s.slice(-2), data]);
+    setData(next); saveData(next);
   }
   function undo() {
     if (!undoStack.length) return;
@@ -206,7 +112,6 @@ function App() {
     setForm(f=>({...f, category:catId}));
     setLastCat(catId);
     try { localStorage.setItem("last_cat", catId); } catch {}
-    setTimeout(() => { amountInputRef.current?.focus(); }, 50);
   }
 
   function getTotals() {
@@ -219,11 +124,11 @@ function App() {
   const totals         = getTotals();
   const carriedSavings = getCarriedSavings(data, period);
   const currentSavings = carriedSavings + (totals["ahorro"]||0);
-  const totalIncome    = Object.values(md.incomes||{}).reduce((a,b)=>a+(Number(b)||0),0);
+  const totalIncome    = Object.values(md.incomes||{}).reduce((a,b)=>a+b,0);
   const totalSpent     = SPEND_CATS.reduce((a,c)=>a+(totals[c.id]||0),0);
   const available      = totalIncome - totalSpent - (totals["ahorro"]||0);
-  const totalBudgets   = Object.values(md.budgets||{}).reduce((a,b)=>a+(Number(b)||0),0);
-  const montoRestante  = totalIncome - totalBudgets - currentSavings;
+  const totalBudgets   = Object.values(md.budgets||{}).reduce((a,b)=>a+b,0);
+  const montoRestante  = totalIncome - totalBudgets;
 
   const pStart = toDateStr(periodStart(period));
   const pEnd   = toDateStr(periodEnd(period));
@@ -238,10 +143,7 @@ function App() {
     if (budget>0&&newSp<=budget)   showToast("✓ Dentro del límite 🎯","good");
     else if (budget>0&&newSp>budget) showToast("⚠️ Superaste el límite","warn");
     else                           showToast("Gasto registrado ✓","ok");
-    setFlashCat(form.category);
-    setTimeout(() => setFlashCat(null), 600);
     setForm(f=>({...f, amount:"", note:"", date:toDateStr(), showNote:false}));
-    setTimeout(() => { amountInputRef.current?.focus(); }, 80);
   }
 
   function deleteExpense(id) {
@@ -254,7 +156,7 @@ function App() {
   function addSavings(amt) {
     const entry = { id:Date.now(), amount:amt, category:"ahorro", note:"Ahorro", date:toDateStr() };
     persist({ ...data, [key]: { ...md, expenses:[...(md.expenses||[]), entry] } });
-    showToast(`💛 +$${fmtARS(amt)} al ahorro`,"good");
+    showToast(`💛 +$${amt.toLocaleString("es-AR")} al ahorro`,"good");
   }
   function editSavings(newTotal) {
     const diff = newTotal - currentSavings;
@@ -272,7 +174,7 @@ function App() {
     if (surplus<=0) { showToast("No hay excedente","warn"); return; }
     const entry = { id:Date.now(), amount:surplus, category:"ahorro", note:"Arqueo de período", date:toDateStr() };
     persist({ ...data, [key]: { ...md, expenses:[...(md.expenses||[]), entry] } });
-    showToast(`+$${fmtARS(surplus)} al ahorro 🏆`,"good");
+    showToast(`+$${surplus.toLocaleString("es-AR")} al ahorro 🏆`,"good");
   }
   function coverFromSavings(catId, excess) {
     const toUse = Math.min(excess, currentSavings);
@@ -280,7 +182,7 @@ function App() {
     const newBudget = (md.budgets?.[catId]||0) + toUse;
     const entry = { id:Date.now(), amount:-toUse, category:"ahorro", note:`↩ Cubrió ${CATEGORIES.find(c=>c.id===catId)?.label}`, date:toDateStr() };
     persist({ ...data, [key]: { ...md, budgets:{...(md.budgets||{}), [catId]:newBudget}, expenses:[...(md.expenses||[]), entry] } });
-    showToast(`$${fmtARS(toUse)} movidos del ahorro`,"ok");
+    showToast(`$${toUse.toLocaleString("es-AR")} movidos del ahorro`,"ok");
   }
   function setIncome(id, val) {
     persist({ ...data, [key]: { ...md, incomes:{...(md.incomes||{}), [id]:parseFloat(val)||0} } });
@@ -289,8 +191,7 @@ function App() {
     persist({ ...data, [key]: { ...md, budgets:{...(md.budgets||{}), [id]:parseFloat(val)||0} } });
   }
 
-  const [showDebug, setShowDebug] = useState(false);
-  const debugRaw = (() => { try { return localStorage.getItem("finanzas_v8") || "vacío"; } catch { return "error"; } })();
+  const hasOverages = SPEND_CATS.some(c=>(totals[c.id]||0)>(md.budgets?.[c.id]||1e9) && (md.budgets?.[c.id]||0)>0);
 
   const NAV = [
     { id:"gastos",   icon:"👌", label:"GASTOS"   },
@@ -310,19 +211,19 @@ function App() {
     if (size==="xl") return (
       <button style={{
         display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-        padding:"32px 24px", borderRadius:20, border:"2px solid", cursor:"pointer",
-        width:"100%", boxSizing:"border-box",
+        padding:"28px 16px", borderRadius:20, border:"2px solid", cursor:"pointer",
+        width:"100%", boxSizing:"border-box", minHeight:140,
         borderColor: sel?"#22d3ee": over?"#f87171": ok?"#4ade80":"#2a3a4a",
         background:  sel?"#164e6388": over?"#3b091066": ok?"#14532d44":"#1a1a2e",
         transition:"all 0.15s",
       }} onClick={()=>selectCat(cat.id)}>
-        <span style={{fontSize:42}}>{cat.icon}</span>
-        <div style={{color:"#e2e8f0",fontSize:17,fontWeight:800,marginTop:8}}>{cat.label}</div>
-        {budget>0&&<div style={{fontSize:12,fontWeight:700,marginTop:3,color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
-          ${fmtARS(spent)} / ${fmtARS(budget)}
-        </div>}
-        {v&&<span style={{fontSize:15,fontWeight:800,marginTop:6,color:v.variance<=0?"#4ade80":"#f87171",background:v.variance<=0?"#14532d66":"#7f1d1d66",borderRadius:10,padding:"5px 14px"}}>
-          {v.variance<=0?`+${fmtARS(Math.abs(v.variance))}` : `-${fmtARS(v.variance)}`}
+        <span style={{fontSize:44}}>{cat.icon}</span>
+        <span style={{color:"#e2e8f0",fontSize:17,marginTop:8,fontWeight:800}}>{cat.label}</span>
+        {budget>0&&<span style={{fontSize:13,fontWeight:700,marginTop:4,color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
+          ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
+        </span>}
+        {v&&<span style={{fontSize:14,fontWeight:800,marginTop:6,color:v.variance<=0?"#4ade80":"#f87171",background:v.variance<=0?"#14532d66":"#7f1d1d66",borderRadius:10,padding:"4px 14px"}}>
+          {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}` : `-${v.variance.toLocaleString("es-AR")}`}
         </span>}
       </button>
     );
@@ -330,18 +231,19 @@ function App() {
     if (size==="lg") return (
       <button style={{
         display:"flex", flexDirection:"column", alignItems:"center",
-        padding:"12px 6px", borderRadius:18, border:"2px solid", cursor:"pointer",
+        padding:"14px 6px", borderRadius:16, border:"2px solid", cursor:"pointer",
+        minHeight:100,
         borderColor: sel?"#22d3ee": over?"#f87171": ok?"#4ade80":"#2a3a4a",
         background:  sel?"#164e6388": over?"#3b091066": ok?"#14532d44":"#1a1a2e",
         transition:"all 0.15s",
       }} onClick={()=>selectCat(cat.id)}>
-        <span style={{fontSize:30}}>{cat.icon}</span>
-        <span style={{color:"#e2e8f0",fontSize:13,marginTop:5,textAlign:"center",fontWeight:700}}>{cat.label}</span>
-        {budget>0&&<span style={{fontSize:11,fontWeight:700,marginTop:3,color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
-          ${fmtARS(spent)} / ${fmtARS(budget)}
+        <span style={{fontSize:26}}>{cat.icon}</span>
+        <span style={{color:"#e2e8f0",fontSize:12,marginTop:4,textAlign:"center",fontWeight:700}}>{cat.label}</span>
+        {budget>0&&<span style={{fontSize:10,fontWeight:700,marginTop:3,color:over?"#f87171":ok?"#4ade80":"#94a3b8"}}>
+          ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
         </span>}
-        {v&&<span style={{fontSize:12,fontWeight:800,marginTop:4,color:v.variance<=0?"#4ade80":"#f87171",background:v.variance<=0?"#14532d66":"#7f1d1d66",borderRadius:8,padding:"3px 10px"}}>
-          {v.variance<=0?`+${fmtARS(Math.abs(v.variance))}` : `-${fmtARS(v.variance)}`}
+        {v&&<span style={{fontSize:11,fontWeight:800,marginTop:3,color:v.variance<=0?"#4ade80":"#f87171",background:v.variance<=0?"#14532d66":"#7f1d1d66",borderRadius:8,padding:"2px 8px"}}>
+          {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}` : `-${v.variance.toLocaleString("es-AR")}`}
         </span>}
       </button>
     );
@@ -357,15 +259,11 @@ function App() {
         <span style={{fontSize:17}}>{cat.icon}</span>
         <span style={{color:"#cbd5e1",fontSize:9,marginTop:2,textAlign:"center",fontWeight:600}}>{cat.label}</span>
         {budget>0&&<span style={{fontSize:8,fontWeight:700,marginTop:1,color:over?"#f87171":ok?"#4ade80":"#64748b"}}>
-          ${fmtARS(spent)} / ${fmtARS(budget)}
+          ${spent.toLocaleString("es-AR")} / ${budget.toLocaleString("es-AR")}
         </span>}
       </button>
     );
   }
-
-  const today = new Date(); today.setHours(0,0,0,0);
-  const pEndDate = new Date(periodEnd(period)); pEndDate.setHours(0,0,0,0);
-  const daysLeftPeriod = Math.max(0, Math.round((pEndDate - today) / 86400000));
 
   return (
     <div style={S.root}><div style={S.app}>
@@ -374,28 +272,21 @@ function App() {
         <div style={S.headerTop}>
           <button style={S.navBtn} onClick={()=>{ const p=prevPeriod(period); if(isPeriodAllowed(p)) setPeriod(p); }}>‹</button>
           <div style={S.headerCenter}>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <span style={S.monthTitle} onLongPress={()=>setShowDebug(true)} onClick={()=>{}} onDoubleClick={()=>setShowDebug(true)}>{periodLabel(period)}</span>
-              <span style={{
-                background: daysLeftPeriod<=5?"#7f1d1d":daysLeftPeriod<=10?"#78350f":"#1e3a2e",
-                color:      daysLeftPeriod<=5?"#fca5a5":daysLeftPeriod<=10?"#fcd34d":"#86efac",
-                fontSize:10, fontWeight:800, borderRadius:8, padding:"3px 8px", letterSpacing:0.5
-              }}>{daysLeftPeriod}d</span>
-            </div>
+            <span style={S.monthTitle}>{periodLabel(period)}</span>
             <div style={S.heroRow}>
               <div style={S.heroCard}>
                 <span style={S.heroCaption}>disponible</span>
-                <span style={{...S.heroAmt,color:available>=0?"#a5b4fc":"#f87171"}}>${fmtARS(available)}</span>
+                <span style={{...S.heroAmt,color:available>=0?"#a5b4fc":"#f87171"}}>${available.toLocaleString("es-AR")}</span>
               </div>
               <div style={S.heroDivider}/>
               <div style={S.heroCard}>
                 <span style={S.heroCaption}>ingresos</span>
-                <span style={S.heroAmt}>${fmtARS(totalIncome)}</span>
+                <span style={S.heroAmt}>${totalIncome.toLocaleString("es-AR")}</span>
               </div>
               <div style={S.heroDivider}/>
               <div style={S.heroCard}>
                 <span style={S.heroCaption}>gastado</span>
-                <span style={{...S.heroAmt,color:"#f87171"}}>${fmtARS(totalSpent)}</span>
+                <span style={{...S.heroAmt,color:"#f87171"}}>${totalSpent.toLocaleString("es-AR")}</span>
               </div>
             </div>
           </div>
@@ -418,15 +309,13 @@ function App() {
               ))}
             </div>
 
-            <input ref={amountInputRef} style={S.bigInput} type="number" inputMode="decimal" placeholder="0"
+            <input key={form.category} style={S.bigInput} type="number" inputMode="decimal" placeholder="0"
               value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))}
               onKeyDown={e=>{ if(e.key==="Enter") addFromForm(); }} autoFocus/>
+            <input style={S.inputSm} type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/>
             {!form.showNote
               ? <button style={S.noteToggle} onClick={()=>setForm(f=>({...f,showNote:true}))}>+ agregar nota</button>
-              : <div style={{display:"flex",gap:6}}>
-                  <input style={{...S.inputSm,flex:1}} type="text" placeholder="Nota..." value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))} autoFocus/>
-                  <input style={{...S.inputSm,width:130,flex:"none"}} type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))}/>
-                </div>
+              : <input style={S.inputSm} type="text" placeholder="Nota..." value={form.note} onChange={e=>setForm(f=>({...f,note:e.target.value}))} autoFocus/>
             }
             <button style={S.primaryBtn} onClick={addFromForm}>👌 Registrar</button>
 
@@ -434,34 +323,6 @@ function App() {
               <button style={{...S.ghostBtn,flex:1,margin:0,padding:"9px",fontSize:11}} onClick={doArqueo}>📊 Arquear período</button>
               {undoStack.length>0&&<button style={{...S.ghostBtn,flex:1,margin:0,padding:"9px",fontSize:11,color:"#f87171",borderColor:"#f8717166"}} onClick={undo}>↩ Deshacer</button>}
             </div>
-
-            {/* Últimos 5 movimientos */}
-            {(md.expenses||[]).length>0 && (() => {
-              const recent = [...(md.expenses||[])].sort((a,b)=>b.id-a.id).slice(0,5);
-              return (
-                <div style={{marginTop:4}}>
-                  <p style={S.sectionTitle}>ÚLTIMOS MOVIMIENTOS</p>
-                  {recent.map(e=>{
-                    const cat = CATEGORIES.find(c=>c.id===e.category);
-                    return (
-                      <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 4px",borderBottom:"1px solid #1e2a3a"}}>
-                        <div style={{display:"flex",alignItems:"center",gap:8}}>
-                          <span style={{fontSize:16}}>{cat?.icon}</span>
-                          <div>
-                            <span style={{color:"#cbd5e1",fontSize:12,fontWeight:600}}>{cat?.label}</span>
-                            {e.note&&<span style={{color:"#475569",fontSize:11}}> · {e.note}</span>}
-                          </div>
-                        </div>
-                        <div style={{display:"flex",alignItems:"center",gap:8}}>
-                          <span style={{color:cat?.color||"#818cf8",fontWeight:700,fontSize:13}}>${fmtARS(e.amount)}</span>
-                          <button style={{...S.editBtn,fontSize:11,width:24,height:24,color:"#475569"}} onClick={()=>deleteExpense(e.id)}>✕</button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
 
             {currentSavings>0 && hasOverages && (
               <div style={{...S.catCard,borderColor:"#92400e",background:"#1c150a"}}>
@@ -472,7 +333,7 @@ function App() {
                   const excess=spent-budget;
                   return (
                     <div key={cat.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                      <span style={{color:"#e2e8f0",fontSize:12}}>{cat.icon} {cat.label} <span style={{color:"#f87171"}}>+${fmtARS(excess)}</span></span>
+                      <span style={{color:"#e2e8f0",fontSize:12}}>{cat.icon} {cat.label} <span style={{color:"#f87171"}}>+${excess.toLocaleString("es-AR")}</span></span>
                       <button style={{background:"#d97706",color:"#fff",border:"none",borderRadius:8,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}
                         onClick={()=>coverFromSavings(cat.id,excess)}>Cubrir</button>
                     </div>
@@ -489,7 +350,7 @@ function App() {
               <p style={{...S.sectionTitle,margin:0}}>LÍMITES · {periodLabel(period)}</p>
               <div style={{textAlign:"right"}}>
                 <span style={{color:"#475569",fontSize:9,textTransform:"uppercase",letterSpacing:1}}>monto restante</span>
-                <div style={{color:montoRestante>=0?"#4ade80":"#f87171",fontSize:15,fontWeight:800}}>${fmtARS(montoRestante)}</div>
+                <div style={{color:montoRestante>=0?"#4ade80":"#f87171",fontSize:15,fontWeight:800}}>${montoRestante.toLocaleString("es-AR")}</div>
               </div>
             </div>
 
@@ -513,7 +374,7 @@ function App() {
                     <span style={S.rowLabel}>{cat.icon} {cat.label}</span>
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
                       {v&&<span style={{fontSize:11,fontWeight:800,color:v.variance<=0?"#4ade80":"#f87171"}}>
-                        {v.variance<=0?`+${fmtARS(Math.abs(v.variance))}`:` -${fmtARS(v.variance)}`}
+                        {v.variance<=0?`+${Math.abs(v.variance).toLocaleString("es-AR")}`:` -${v.variance.toLocaleString("es-AR")}`}
                       </span>}
                       <input style={S.rowInput} type="number" inputMode="decimal" placeholder="Límite"
                         value={budget||""} onChange={e=>setBudget(cat.id,e.target.value)}/>
@@ -528,11 +389,11 @@ function App() {
                       {v
                         ? <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
                             <span style={S.metaText}>${v.dailyRate}/día</span>
-                            <span style={S.metaText}>Esp: ${fmtARS(v.expected)} · {v.daysLeft}d</span>
+                            <span style={S.metaText}>Esp: ${v.expected.toLocaleString("es-AR")} · {v.daysLeft}d</span>
                           </div>
                         : <div style={{marginTop:4}}>
                             <span style={{...S.metaText,color:over?"#f87171":"#64748b"}}>
-                              {over?`Excedente: $${fmtARS(spent-budget)}`:`Restante: $${fmtARS(budget-spent)}`}
+                              {over?`Excedente: $${(spent-budget).toLocaleString("es-AR")}`:`Restante: $${(budget-spent).toLocaleString("es-AR")}`}
                             </span>
                           </div>
                       }
@@ -556,24 +417,13 @@ function App() {
             ))}
             <div style={{...S.row,borderColor:"#818cf8"}}>
               <span style={{...S.rowLabel,color:"#818cf8",fontWeight:700}}>Total</span>
-              <span style={{color:"#818cf8",fontWeight:700,fontSize:16}}>${fmtARS(totalIncome)}</span>
+              <span style={{color:"#818cf8",fontWeight:700,fontSize:16}}>${totalIncome.toLocaleString("es-AR")}</span>
             </div>
           </div>
         )}
 
         {view==="historial" && (
-          <div style={S.section}>
-            <div style={{display:"flex",gap:8,marginBottom:4}}>
-              <button style={{...S.ghostBtn,flex:1,margin:0,padding:"10px",fontSize:12,color:"#22d3ee",borderColor:"#22d3ee44"}}
-                onClick={exportData}>💾 Exportar backup</button>
-              <label style={{flex:1,margin:0,padding:"10px",fontSize:12,cursor:"pointer",textAlign:"center",
-                color:"#a5b4fc",border:"1px solid #a5b4fc44",borderRadius:10,background:"transparent",fontFamily:"inherit"}}>
-                📂 Importar backup
-                <input type="file" accept=".json" style={{display:"none"}} onChange={e=>importData(e.target.files[0])}/>
-              </label>
-            </div>
-            <History expenses={md.expenses||[]} onDelete={deleteExpense} onUpdate={updateExpense}/>
-          </div>
+          <History expenses={md.expenses||[]} onDelete={deleteExpense} onUpdate={updateExpense}/>
         )}
       </div>
 
@@ -595,26 +445,6 @@ function App() {
           );
         })}
       </div>
-
-      {showDebug && (
-        <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#0f0f1aee",zIndex:999,overflow:"auto",padding:16}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-            <span style={{color:"#22d3ee",fontWeight:800,fontSize:14}}>🔍 DIAGNÓSTICO localStorage</span>
-            <button style={{...S.ghostBtn,margin:0,padding:"6px 12px",fontSize:12}} onClick={()=>setShowDebug(false)}>✕ Cerrar</button>
-          </div>
-          <pre style={{color:"#e2e8f0",fontSize:10,whiteSpace:"pre-wrap",wordBreak:"break-all",background:"#1a1a2e",padding:12,borderRadius:12}}>
-            {(() => { try { return JSON.stringify(JSON.parse(debugRaw==="vacío"?"{}":debugRaw), null, 2); } catch { return debugRaw; } })()}
-          </pre>
-          <div style={{display:"flex",gap:8,marginTop:12}}>
-            <button style={{...S.ghostBtn,flex:1,margin:0,padding:"10px",fontSize:12,color:"#22d3ee",borderColor:"#22d3ee66"}}
-              onClick={()=>exportData()}>💾 Exportar JSON</button>
-            <label style={{...S.ghostBtn,flex:1,margin:0,padding:"10px",fontSize:12,cursor:"pointer",textAlign:"center",color:"#a5b4fc",borderColor:"#a5b4fc66"}}>
-              📂 Importar JSON
-              <input type="file" accept=".json" style={{display:"none"}} onChange={e=>importData(e.target.files[0])}/>
-            </label>
-          </div>
-        </div>
-      )}
 
       {toast&&(
         <div style={{...S.toast,
@@ -648,7 +478,7 @@ function SavingsCard({ currentSavings, onAdd, onEdit, onArqueo, onUndo }) {
           <div style={{color:"#fbbf24",fontSize:14,fontWeight:800}}>🔒 Ahorro</div>
           <div style={{color:"#92400e",fontSize:10,marginTop:1}}>No se toca · viaja entre períodos</div>
         </div>
-        <span style={{color:"#fbbf24",fontSize:22,fontWeight:800}}>${fmtARS(currentSavings)}</span>
+        <span style={{color:"#fbbf24",fontSize:22,fontWeight:800}}>${currentSavings.toLocaleString("es-AR")}</span>
       </div>
 
       {mode==="add"&&(
@@ -723,7 +553,7 @@ function History({ expenses, onDelete, onUpdate }) {
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
                   <span style={{color:e.amount<0?"#f87171":cat?.color,fontWeight:700}}>
-                    {e.amount<0?"-":"+"}${fmtARS(Math.abs(e.amount||0))}
+                    {e.amount<0?"-":"+"}${Math.abs(e.amount||0).toLocaleString("es-AR")}
                   </span>
                   <button style={S.editBtn} onClick={()=>setEditId(e.id)}>✏️</button>
                 </div>
@@ -749,7 +579,6 @@ const S = {
   heroDivider: { width:1, height:32, background:"#1e2a3a" },
   heroCaption: { color:"#475569", fontSize:9, letterSpacing:1, textTransform:"uppercase" },
   heroAmt:     { color:"#f1f5f9", fontSize:16, fontWeight:800 },
-
   content:     { flex:1, overflowY:"auto", padding:"12px 12px 8px" },
   section:     { display:"flex", flexDirection:"column", gap:9 },
   sectionTitle:{ color:"#475569", fontSize:10, letterSpacing:2, textTransform:"uppercase", margin:"2px 0" },
